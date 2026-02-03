@@ -5,6 +5,7 @@
 #include <vector>
 #include <random>
 #include <sstream>
+#include <atomic>
 template<typename K, typename V>
 class SkipList { 
 private:
@@ -12,15 +13,22 @@ private:
         K key;
         V value;
         // 存储每一层后继结点的指针数组
-        std::vector<Node*> next;
+        // std::vector<Node*> next;
+        // 用atomic改造next
+        std::vector<std::atomic<Node*>> next;
 
-        Node(K k, V v, int level): key(k), value(v), next(level, nullptr){}
+        Node(K k, V v, int level): key(k), value(v), next(level){
+            // atomic不可拷贝，因此不能全初始化为nullptr
+            for (int i = 0; i < level; i++) {
+                next[i].store(nullptr); // 只能用store
+            }
+        }
     };
 
     int max_level;      // 跳表允许的最大层高
-    int current_level;  // 当前跳表的实际最高层高
+    std::atomic<int> current_level;  // 当前跳表的实际最高层高
     Node* head;         // 头节点（哨兵）
-    int node_count;     // 元素个数
+    std::atomic<int> node_count;     // 元素个数
 
 public:
     SkipList(int max_level = 16): max_level(max_level), current_level(0), node_count(0){
@@ -31,7 +39,7 @@ public:
         // 我们只需要沿着最底层的“主干道”（即 next[0]）把所有楼拆了就行。
         Node* curr = head->next[0]; // 从第 0 层的第一个有效节点开始
         while (curr) {
-            Node* next_node = curr->next[0]; // 1. 先记住下一个人的地址
+            Node* next_node = curr->next[0].load(); // 1. 先记住下一个人的地址
             delete curr;                    // 2. 放心大胆地把当前节点拆了
             curr = next_node;               // 3. 挪到下一个人那里
         }
@@ -44,7 +52,7 @@ public:
 
         // 1. 寻找每一层的前驱
         for (int i = current_level - 1; i >= 0; i--) {
-            while (curr->next[i] && curr->next[i]->key < key) {
+            while (curr->next[i] && curr->next[i].load()->key < key) {
                 curr = curr->next[i];
             }
             update[i] = curr;
@@ -69,8 +77,11 @@ public:
         // 4. 创建并插入
         Node* new_node = create_node(key, value, level);
         for (int i = 0; i < level; i++) {
-            new_node->next[i] = update[i]->next[i];
-            update[i]->next[i] = new_node;
+            // new_node->next[i] = update[i]->next[i];
+            // update[i]->next[i] = new_node;
+            // 改成load和store
+            new_node->next[i].store(update[i]->next[i].load());
+            update[i]->next[i].store(new_node);
         }
 
         node_count++;
@@ -80,9 +91,11 @@ public:
         // 1. 从 head 开始，从当前最高层 (current_level - 1) 往下找
         Node* curr = head;
         for (int i = current_level - 1; i >= 0; i--) { 
+            Node* next_node = curr->next[i].load(); // 原子加载
             // 2. 在每一层中，只要“下一个节点的 key”小于“目标 key”，就一直向右走
-            while (curr->next[i] && curr->next[i]->key < key) {
-                curr = curr->next[i];
+            while (next_node && next_node->key < key) {
+                curr = next_node;
+                next_node = curr->next[i].load();
             }
             // 3. 如果当前层走不动了（下一节点大于目标或为空），就下降一层
             // 4. 重复上述过程，直到降到第 0 层
@@ -91,8 +104,8 @@ public:
         // 5. 检查第 0 层的下一个节点：
         //    - 如果 key 相等，把 value 存入参数并返回 true
         //    - 否则，说明 key 不存在，返回 false
-        if (curr->next[0] && curr->next[0]->key == key) {
-            value = curr->next[0]->value;
+        if (curr->next[0] && curr->next[0].load()->key == key) {
+            value = curr->next[0].load()->value;
             return true;
         }
         else {
@@ -105,7 +118,7 @@ public:
         // 2. 从最高层开始向下寻找，填充 update 数组
         Node* curr = head;
         for (int i = current_level - 1; i >= 0; i--) {
-            while (curr->next[i] && curr->next[i]->key < key) {
+            while (curr->next[i] && curr->next[i].load()->key < key) {
                 curr = curr->next[i];
             }
             update[i] = curr;
@@ -116,15 +129,15 @@ public:
         //    - 如果 update[i] 的下一个节点是我们要删的节点，就把它“跳过去”
         //    - 如果某一层 update[i] 指向的不是该节点，说明更高层也没有了，停止循环
         // 5. delete 该节点内存，node_count--
-        if (curr->next[0] && curr->next[0]->key == key) {
+        if (curr->next[0] && curr->next[0].load()->key == key) {
             // 确定了，要删的就是这个next[0]
             Node* del_node = curr->next[0];
             for (int i = 0; i < current_level; i++){
-                if (update[i]->next[i] != del_node) {
+                if (update[i]->next[i].load() != del_node) {
                     break; 
                 }
                 // 关键动作：跳过去
-                update[i]->next[i] = del_node->next[i];
+                update[i]->next[i].store(del_node->next[i].load());
             }
             // 删除结点
             delete del_node; 
@@ -145,7 +158,7 @@ public:
     void display_list() {
         // 1. 获取基准 key（逻辑不变）
         std::vector<K> keys;
-        Node* base = head->next[0];
+        Node* base = head->next[0].load();
         while (base) {
             keys.push_back(base->key);
             base = base->next[0];
