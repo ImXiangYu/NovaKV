@@ -84,7 +84,7 @@ public:
             update[i]->next[i].store(new_node);
         }
 
-        node_count++;
+        ++node_count;
         return true;
     }
     bool search_element(K key, V& value) {
@@ -141,14 +141,14 @@ public:
             }
             // 删除结点
             delete del_node; 
-            node_count--;
+            --node_count;
         } else {
             return false;
         }
         // 6. 善后：检查 current_level，如果删除了某层唯一的节点，导致高层变空，记得降层
         // 只要最高层没有后继节点，且层数还没降到 0，就一直降
         while (current_level > 0 && head->next[current_level - 1] == nullptr) {
-            current_level--;
+            --current_level;
         }
         return true;
     }

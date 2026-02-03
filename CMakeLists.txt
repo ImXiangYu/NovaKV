@@ -22,14 +22,26 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# 搜索 test 目录下所有的测试源文件
-file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
+# 1. 搜集所有测试源码文件
+file(GLOB TEST_FILES "tests/*.cpp")
 
-# 创建测试程序
-add_executable(unit_tests ${TEST_SOURCES} ${SOURCES})
+# 2. 循环处理每一个文件，将其注册为独立的测试目标
+foreach(test_file ${TEST_FILES})
+    # 获取文件名（不带后缀），作为 Target 名字
+    get_filename_component(test_name ${test_file} NAME_WE)
 
-# 链接 GTest 库 (gtest_main 会自动提供测试入口，不需要你写 main 函数)
-target_link_libraries(unit_tests gtest_main)
+    # 为该文件创建独立的可执行文件
+    # 注意：这里也链接了 ${SOURCES}，确保测试能用到 src 里的代码
+    add_executable(${test_name} ${test_file} ${SOURCES})
+
+    # 链接必要的库：gtest_main (自动入口), gtest (核心), pthread (线程支持)
+    target_link_libraries(${test_name} gtest_main gtest pthread)
+
+    # 将其注册到 CTest 框架中，方便一键跑所有测试
+    add_test(NAME ${test_name} COMMAND ${test_name})
+
+    message(STATUS "Created test target: ${test_name}")
+endforeach()
 
 # 启用 ctest 命令行工具
 enable_testing()
