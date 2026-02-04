@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "skiplist.h"
+#include "SkipList.h"
 #include <climits>
 
 // 测试插入和查询
