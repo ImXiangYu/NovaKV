@@ -3,7 +3,7 @@
 //
 
 #include <gtest/gtest.h>
-#include "block_builder.h"
+#include "BlockBuilder.h"
 
 class BlockBuilderTest : public ::testing::Test {
     protected:
