@@ -13,7 +13,10 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 # --- 目标 1: 你的手动测试程序 (保留 main.cpp) ---
 add_executable(nova_test main.cpp ${SOURCES}
         include/WalHandler.h
-        include/BlockBuilder.h)
+        include/BlockBuilder.h
+        include/FileFormats.h
+        include/SSTableBuilder.h
+        include/Storage.h)
 
 # --- 目标 2: Google Test 单元测试 ---
 include(FetchContent)
@@ -36,7 +39,10 @@ foreach(test_file ${TEST_FILES})
     # 注意：这里也链接了 ${SOURCES}，确保测试能用到 src 里的代码
     add_executable(${test_name} ${test_file} ${SOURCES}
             include/WalHandler.h
-            include/BlockBuilder.h)
+            include/BlockBuilder.h
+            include/FileFormats.h
+            include/SSTableBuilder.h
+            include/Storage.h)
 
     # 链接必要的库：gtest_main (自动入口), gtest (核心), pthread (线程支持)
     target_link_libraries(${test_name} gtest_main gtest pthread)

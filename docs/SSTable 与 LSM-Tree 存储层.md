@@ -65,3 +65,24 @@ SSTable 是 LSM-Tree 的基石。它不仅仅是一个文件，而是一个**分
 
 - **逻辑**：如果文件很多，一个个查索引也慢。布隆过滤器能通过位运算快速告诉你：“这个 Key 绝对不在这个文件里”。
 - **开发任务**：实现一个简单的哈希位图结构。
+
+
+
+## SSTableBuilder、FileFormats和BlockBuilder
+
+| **组件**             | **角色**   | **核心职责**                                                 | **存储位置**        |
+| -------------------- | ---------- | ------------------------------------------------------------ | ------------------- |
+| **`BlockBuilder`**   | **打包员** | 负责 KV 对的**微观布局**。它不关心磁盘，只负责在内存（`std::string`）里按协议拼接二进制字节流。 | **内存 (RAM)**      |
+| **`WritableFile`**   | **运输车** | 负责 **IO 抽象**。它不关心数据内容，只负责把一段给定的内存数据（`std::string`）顺序追加到磁盘文件中。 | **物理磁盘 (Disk)** |
+| **`SstableBuilder`** | **调度员** | 负责 **宏观逻辑**。它监控 `BlockBuilder` 的大小，决定何时调用 `WritableFile` 落盘，并收集索引信息。 | **承上启下**        |
+
+### 它们是如何协同工作的？（流程视角）
+
+当我们执行 `SstableBuilder->Add(key, value)` 时，内部发生的“接力”如下：
+
+1. **判定**：`SstableBuilder` 问 `BlockBuilder`：“你现在的包有多大了？”
+2. **触发**：如果 `BlockBuilder` 说“快 4KB 了”，`SstableBuilder` 就会启动落盘流程：
+   - 调用 `BlockBuilder->Finish()` 拿到打包好的**二进制块**。
+   - 调用 `WritableFile->Append()` 把这个块**扔进磁盘**。
+   - `SstableBuilder` 记录下此刻 `WritableFile->Size()` 产生的 **Offset**。
+3. **继续**：`SstableBuilder` 调用 `BlockBuilder->Reset()`，开始打包下一个块。
