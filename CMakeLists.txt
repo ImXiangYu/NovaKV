@@ -16,7 +16,8 @@ add_executable(nova_test main.cpp ${SOURCES}
         include/BlockBuilder.h
         include/FileFormats.h
         include/SSTableBuilder.h
-        include/Storage.h)
+        include/Storage.h
+        include/SSTableReader.h)
 
 # --- 目标 2: Google Test 单元测试 ---
 include(FetchContent)
@@ -42,7 +43,8 @@ foreach(test_file ${TEST_FILES})
             include/BlockBuilder.h
             include/FileFormats.h
             include/SSTableBuilder.h
-            include/Storage.h)
+            include/Storage.h
+            include/SSTableReader.h)
 
     # 链接必要的库：gtest_main (自动入口), gtest (核心), pthread (线程支持)
     target_link_libraries(${test_name} gtest_main gtest pthread)
