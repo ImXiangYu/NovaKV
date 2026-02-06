@@ -1,0 +1,185 @@
+//
+// Created by 26708 on 2026/2/6.
+//
+#include "SSTableReader.h"
+
+#include <cstring>
+#include <fcntl.h>
+#include <iostream>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <algorithm>
+
+SSTableReader::SSTableReader(): fd_(-1), data_(MAP_FAILED), file_size_(0) {}
+
+SSTableReader::~SSTableReader() {
+    if (data_ != MAP_FAILED) {
+        munmap(data_, file_size_);
+    }
+    if (fd_ >= 0) {
+        close(fd_);
+    }
+}
+
+SSTableReader* SSTableReader::Open(const std::string &filename) {
+    // 1. 打开文件 (POSIX 标准)
+    int fd = open(filename.c_str(), O_RDONLY);
+    if (fd < 0) {
+        perror("Failed to open file");
+        return nullptr;
+    }
+
+    // 2. 获取文件大小
+    struct stat st{};
+    if (fstat(fd, &st) != 0 || st.st_size < Footer::kEncodedLength) {
+        close(fd);
+        return nullptr;
+    }
+    size_t size = st.st_size;
+    std::cout << "[Debug] File size: " << size << std::endl;
+
+    // 3. 内存映射 (mmap)
+    void* mmap_ptr = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (mmap_ptr == MAP_FAILED) {
+        perror("mmap failed");
+        close(fd);
+        return nullptr;
+    }
+    std::cout << "[Debug] mmap pointer: " << mmap_ptr << std::endl;
+
+    // 4. 创建实例并初始化基本成员
+    auto* reader = new SSTableReader();
+    reader->fd_ = fd;
+    reader->data_ = mmap_ptr;
+    reader->file_size_ = size;
+
+    // 5. 校验 Footer (这是进入 SSTable 世界的入场券)
+    if (!reader->ReadFooter()) {
+        std::cerr << "Invalid SSTable file: Footer check failed." << std::endl;
+        delete reader; // 析构函数会负责 munmap 和 close
+        return nullptr;
+    }
+    std::cout << "[Debug] Footer decoded." << std::endl;
+
+    // 6. 加载索引
+    if (!reader->ReadIndexBlock()) {
+        std::cerr << "Failed to read Index Block." << std::endl;
+        delete reader;
+        return nullptr;
+    }
+
+    return reader;
+}
+
+// 内部读取逻辑
+bool SSTableReader::ReadFooter() {
+    // 逻辑：定位到内存末尾的 24 字节
+    const char* footer_ptr = static_cast<const char*>(data_) + file_size_ - Footer::kEncodedLength;
+
+    // 将这 24 字节转为 string 供 DecodeFrom 使用
+    std::string footer_buf(footer_ptr, Footer::kEncodedLength);
+
+    return footer_.DecodeFrom(footer_buf);
+}
+
+bool SSTableReader::ReadIndexBlock() {
+    // 1. 获取 Index Block 的位置信息
+    uint64_t offset = footer_.index_handle.offset;
+    uint64_t size = footer_.index_handle.size;
+
+    // 边界安全检查：索引块不能超出文件范围
+    if (offset + size > file_size_ - Footer::kEncodedLength) {
+        return false;
+    }
+
+    // 2. 定位到索引块起始指针
+    const char* index_ptr = static_cast<const char*>(data_) + offset;
+
+    // 3. 解析二进制数据
+    // 提示：我们在写入时是按照 [KeyLen][Key][Offset][Size] 循环写入的
+    uint64_t pos = 0;
+    while (pos < size) {
+        IndexEntry entry;
+
+        // 读取 Key 长度 (uint32_t)
+        uint32_t key_len;
+        std::memcpy(&key_len, index_ptr + pos, sizeof(uint32_t));
+        pos += sizeof(uint32_t);
+
+        // 读取 Key 字符串
+        entry.last_key.assign(index_ptr + pos, key_len);
+        pos += key_len;
+
+        // 读取 Value 长度 (uint32_t)，其实就是一个标准BlockHandle
+        uint32_t val_len;
+        std::memcpy(&val_len, index_ptr + pos, sizeof(uint32_t));
+        pos += sizeof(uint32_t);
+
+        // 读取 BlockHandle (Offset 和 Size)
+        // 读取 Offset
+        memcpy(&entry.handle.offset, index_ptr + pos, sizeof(uint64_t));
+        pos += sizeof(uint64_t);
+        // 读取 Size
+        memcpy(&entry.handle.size, index_ptr + pos, sizeof(uint64_t));
+        pos += sizeof(uint64_t);
+
+        // 添加到索引列表中
+        index_entries_.push_back(entry);
+    }
+
+    // 索引列表非空
+    return !index_entries_.empty();
+}
+
+bool SSTableReader::Get(const std::string &key, std::string *value) {
+    // 1. 在索引中二分查找 (使用 std::lower_bound)
+    // 查找第一个 last_key >= key 的索引条目
+    auto it = std::lower_bound(index_entries_.begin(), index_entries_.end(), key,
+        [](const IndexEntry& entry, const std::string& k) {
+            return entry.last_key < k;
+        });
+
+    // 如果没找到符合条件的 Block，说明 key 大于文件中所有的 key
+    if (it == index_entries_.end()) {
+        return false;
+    }
+
+    // 2. 根据索引条目定位到具体的 Data Block
+    const char* block_ptr = static_cast<const char*>(data_) + it->handle.offset;
+    uint64_t block_size = it->handle.size;
+
+    // 3. 在 Data Block 内部进行扫描
+    // Data Block 布局: [KeyLen][Key][ValLen][Val] ...
+    uint64_t pos = 0;
+    while (pos < block_size) {
+        // 解析 KeyLen
+        uint32_t curr_key_len;
+        memcpy(&curr_key_len, block_ptr + pos, sizeof(uint32_t));
+        pos += sizeof(uint32_t);
+
+        // 解析 Key
+        std::string curr_key(block_ptr + pos, curr_key_len);
+        pos += curr_key_len;
+
+        // 解析 ValLen
+        uint32_t val_len;
+        memcpy(&val_len, block_ptr + pos, sizeof(uint32_t));
+        pos += sizeof(uint32_t);
+
+        // 匹配检查
+        if (curr_key == key) {
+            value->assign(block_ptr + pos, val_len);
+            return true; // 找到了！
+        }
+
+        // 没找着，跳过当前 Value 继续扫下一个 KV
+        pos += val_len;
+    }
+
+    // 这个 Block 里没有这个 Key
+    return false;
+}
+
+
+

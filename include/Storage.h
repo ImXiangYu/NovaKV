@@ -8,6 +8,7 @@
 
 #include <string>
 #include <cstdint>
+#include <cstring>
 
 // 就像书的页码：记录这一页从哪开始，多长
 struct BlockHandle {
@@ -47,11 +48,11 @@ struct Footer {
         if (input.size() < kEncodedLength) return false;
 
         const char* p = input.data();
-        memcpy(&index_handle.offset, p, sizeof(uint64_t));
-        memcpy(&index_handle.size, p + 8, sizeof(uint64_t));
+        std::memcpy(&index_handle.offset, p, sizeof(uint64_t));
+        std::memcpy(&index_handle.size, p + 8, sizeof(uint64_t));
 
         uint64_t magic;
-        memcpy(&magic, p + 16, sizeof(uint64_t));
+        std::memcpy(&magic, p + 16, sizeof(uint64_t));
 
         return (magic == kMagicNumber); // 校验魔数
     }
