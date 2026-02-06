@@ -27,6 +27,8 @@ class SSTableReader {
         bool ReadFooter();
         bool ReadIndexBlock();
 
+        bool ReadFilterBlock();
+
         // 资源句柄
         int fd_;                // 文件描述符
         void* data_;            // mmap 映射后的起始地址
@@ -34,6 +36,7 @@ class SSTableReader {
 
         Footer footer_;         // 存放在末尾读到的罗盘信息
         std::vector<IndexEntry> index_entries_; // 内存中的索引“地图”
+        std::string filter_data_; // 存放从文件中读取的位图数据
 };
 
 #endif //NOVAKV_SSTABLEREADER_H

@@ -11,6 +11,8 @@
 #include <sys/stat.h>
 #include <algorithm>
 
+#include "BloomFilter.h"
+
 SSTableReader::SSTableReader(): fd_(-1), data_(MAP_FAILED), file_size_(0) {}
 
 SSTableReader::~SSTableReader() {
@@ -67,6 +69,12 @@ SSTableReader* SSTableReader::Open(const std::string &filename) {
         std::cerr << "Failed to read Index Block." << std::endl;
         delete reader;
         return nullptr;
+    }
+
+    // 7. 加载布隆过滤器
+    if (!reader->ReadFilterBlock()) {
+        std::cerr << "Failed to read Filter Block." << std::endl;
+        // 这里可以报错也可以不报错，取决于你是否允许没有过滤器的文件存在
     }
 
     return reader;
@@ -133,6 +141,14 @@ bool SSTableReader::ReadIndexBlock() {
 }
 
 bool SSTableReader::Get(const std::string &key, std::string *value) {
+    // 如果过滤器说肯定不在，直接返回 false，省去后面的索引查找和数据块解析
+    if (!filter_data_.empty()) {
+        if (!BloomFilter::KeyMayMatch(key, filter_data_)) {
+            std::cout << "[Debug] BloomFilter blocked key: " << key << std::endl;
+            return false;
+        }
+    }
+
     // 1. 在索引中二分查找 (使用 std::lower_bound)
     // 查找第一个 last_key >= key 的索引条目
     auto it = std::lower_bound(index_entries_.begin(), index_entries_.end(), key,
@@ -179,6 +195,22 @@ bool SSTableReader::Get(const std::string &key, std::string *value) {
 
     // 这个 Block 里没有这个 Key
     return false;
+}
+
+bool SSTableReader::ReadFilterBlock() {
+    uint64_t offset = footer_.filter_handle.offset;
+    uint64_t size = footer_.filter_handle.size;
+
+    if (size == 0) return true; // 如果大小为0，说明没写过滤器，正常返回
+
+    // 安全检查
+    if (offset + size > file_size_) return false;
+
+    // 直接从 mmap 内存中 copy 出来，或者用 string_view 指向它
+    const char* filter_ptr = static_cast<const char*>(data_) + offset;
+    filter_data_.assign(filter_ptr, size);
+
+    return true;
 }
 
 

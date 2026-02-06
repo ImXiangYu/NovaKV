@@ -10,6 +10,8 @@
 #include "Storage.h"
 #include <iostream>
 
+#include "BloomFilter.h"
+
 class SSTableBuilder {
     public:
         SSTableBuilder(WritableFile* file) : file_(file) {}
@@ -23,6 +25,8 @@ class SSTableBuilder {
 
             // 2. 将数据喂给 BlockBuilder
             data_block_.Add(key, value);
+            // 收集 Key 用于布隆过滤器
+            keys_.push_back(key);
 
             // 3. 更新当前文件的最大 Key
             last_key_ = key; // 持续更新，直到 Block 结束，它就是 Last Key
@@ -35,6 +39,9 @@ class SSTableBuilder {
                 WriteDataBlock();
             }
 
+            // 写入布隆过滤器
+            WriteFilterBlock();
+
             // 记录 Index Block 的位置
             BlockHandle index_handle;
             index_handle.offset = file_->Size();
@@ -46,11 +53,14 @@ class SSTableBuilder {
             // 3. 写入 Footer
             Footer footer;
             footer.index_handle = index_handle;
+            footer.filter_handle = filter_handle_;
+
             std::string footer_encoding;
             footer.EncodeTo(&footer_encoding);
             file_->Append(footer_encoding);
 
             file_->Flush();
+            std::cout << "SSTable Build Finished. Total Size: " << file_->Size() << std::endl;
         }
 
     private:
@@ -94,10 +104,29 @@ class SSTableBuilder {
             std::cout << "Index Block Written. Entries: " << index_entries_.size() << std::endl;
         }
 
+        // 布隆过滤器
+        void WriteFilterBlock() {
+            if (keys_.empty()) return;
+
+            BloomFilter filter_gen(10);
+            std::string filter_data = filter_gen.CreateFilter(keys_);
+
+            // 直接通过 file_->Size() 获取当前准确的偏移量
+            filter_handle_.offset = file_->Size();
+            filter_handle_.size = filter_data.size();
+
+            file_->Append(filter_data);
+
+            std::cout << "Filter Block Written. Offset=" << filter_handle_.offset
+                      << ", Size=" << filter_handle_.size << " bytes." << std::endl;
+        }
+
         WritableFile* file_;
         BlockBuilder data_block_;
         std::string last_key_;
         std::vector<IndexEntry> index_entries_;
+        std::vector<std::string> keys_; // 暂存所有加入的 Key，用于生成过滤器
+        BlockHandle filter_handle_;     // 记录过滤器在文件中的位置
 };
 
 #endif //NOVAKV_SSTABLEBUILDER_H
