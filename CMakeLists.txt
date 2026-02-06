@@ -18,6 +18,7 @@ add_executable(nova_test main.cpp ${SOURCES}
         include/SSTableBuilder.h
         include/Storage.h
         include/SSTableReader.h
+        include/BloomFilter.h
         src/SSTableReader.cpp)
 
 # --- 目标 2: Google Test 单元测试 ---
@@ -46,6 +47,7 @@ foreach(test_file ${TEST_FILES})
             include/SSTableBuilder.h
             include/Storage.h
             include/SSTableReader.h
+            include/BloomFilter.h
             src/SSTableReader.cpp)
 
     # 链接必要的库：gtest_main (自动入口), gtest (核心), pthread (线程支持)
