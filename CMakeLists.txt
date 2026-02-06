@@ -10,6 +10,12 @@ include_directories(include)
 # 自动搜寻 src 下的逻辑代码（不包含 main.cpp）
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 
+# 明确列出源文件以提高可读性
+set(SOURCES
+    src/SSTableReader.cpp
+    src/SSTableBuilder.cpp
+)
+
 # --- 目标 1: 你的手动测试程序 (保留 main.cpp) ---
 add_executable(nova_test main.cpp ${SOURCES}
         include/WalHandler.h
