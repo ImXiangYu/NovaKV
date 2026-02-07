@@ -104,6 +104,37 @@ class MemTable {
             std::shared_lock<std::shared_mutex> lock(rw_lock_);
             return table_.size();
         }
+
+        auto GetIterator() {
+            // 记得加读锁，虽然此时 imm_ 是只读的，但养成习惯没坏处
+            return table_.begin();
+        }
+
+        // [DBImpl]
+        // 1. 获取 WalHandler 指针，方便 DBImpl 调用 LoadLog
+        WalHandler* GetWalHandler() { return &wal_; }
+
+        // 2. 纯内存插入：用于从 WAL 恢复数据或 Minor Compaction
+        // 绕过了 wal_.AddLog(key, value, OpType::ADD);
+        void PutWithoutWal(const K& key, const V& value) {
+            std::unique_lock<std::shared_mutex> lock(rw_lock_);
+            table_.insert_element(key, value);
+        }
+
+        // 3. 纯内存删除
+        void RemoveWithoutWal(const K& key) {
+            std::unique_lock<std::shared_mutex> lock(rw_lock_);
+            table_.delete_element(key);
+        }
+
+        // 4. 获取内存占用估算 (字节)
+        // 这是一个硬核指标，用于触发 Minor Compaction
+        size_t ApproximateMemoryUsage() {
+            // 粗略计算：SkipList 节点数 * (Key平均大小 + Value平均大小 + 指针开销)
+            // 简单起见，可以先返回 table_.size() * 100 (假设平均每条 100 字节)
+            // 或者在 SkipList 里维护一个精确的 byte_counter
+            return table_.size() * 128;
+        }
 };
 
 #endif //NOVAKV_MEMTABLE_H

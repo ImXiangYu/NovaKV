@@ -6,6 +6,8 @@
 #include <random>
 #include <sstream>
 #include <atomic>
+#include <iostream>
+
 template<typename K, typename V>
 class SkipList { 
     public:

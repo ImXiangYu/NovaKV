@@ -14,6 +14,7 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 set(SOURCES
     src/SSTableReader.cpp
     src/SSTableBuilder.cpp
+        src/DBImpl.cpp
 )
 
 # --- 目标 1: 你的手动测试程序 (保留 main.cpp) ---
@@ -26,6 +27,8 @@ add_executable(nova_test main.cpp ${SOURCES}
         include/SSTableReader.h
         include/BloomFilter.h
         src/SSTableReader.cpp
+        include/DBImpl.h
+        src/DBImpl.cpp
 )
 
 # --- 目标 2: Google Test 单元测试 ---
@@ -56,6 +59,8 @@ foreach(test_file ${TEST_FILES})
             include/SSTableReader.h
             include/BloomFilter.h
             src/SSTableReader.cpp
+            include/DBImpl.h
+            src/DBImpl.cpp
     )
 
     # 链接必要的库：gtest_main (自动入口), gtest (核心), pthread (线程支持)
