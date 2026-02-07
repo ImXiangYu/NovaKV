@@ -14,6 +14,7 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 set(SOURCES
     src/SSTableReader.cpp
     src/SSTableBuilder.cpp
+    src/ImmutableMemTable.cpp
 )
 
 # --- 目标 1: 你的手动测试程序 (保留 main.cpp) ---
@@ -25,7 +26,8 @@ add_executable(nova_test main.cpp ${SOURCES}
         include/Storage.h
         include/SSTableReader.h
         include/BloomFilter.h
-        src/SSTableReader.cpp)
+        src/SSTableReader.cpp
+        include/ImmutableMemTable.h)
 
 # --- 目标 2: Google Test 单元测试 ---
 include(FetchContent)
@@ -54,7 +56,8 @@ foreach(test_file ${TEST_FILES})
             include/Storage.h
             include/SSTableReader.h
             include/BloomFilter.h
-            src/SSTableReader.cpp)
+            src/SSTableReader.cpp
+            include/ImmutableMemTable.h)
 
     # 链接必要的库：gtest_main (自动入口), gtest (核心), pthread (线程支持)
     target_link_libraries(${test_name} gtest_main gtest pthread)
