@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 统一核心库，避免重复列源文件
 set(NOVAKV_SOURCES
+    src/BlockBuilder.cpp
     src/DBImpl.cpp
     src/SSTableBuilder.cpp
     src/SSTableReader.cpp
