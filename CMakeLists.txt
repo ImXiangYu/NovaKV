@@ -39,6 +39,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(benchmark)
 
+# --- 目标 4: 基准测试可执行文件 ---
+add_executable(nova_bench benchmark/db_bench.cpp)
+target_link_libraries(nova_bench PRIVATE novakv_core benchmark::benchmark)
+
 # 1. 搜集所有测试源码文件
 file(GLOB TEST_FILES "tests/*.cpp")
 
