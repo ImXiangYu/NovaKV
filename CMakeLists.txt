@@ -11,8 +11,7 @@ set(NOVAKV_SOURCES
     src/SSTableBuilder.cpp
     src/SSTableReader.cpp
     src/WalHandler.cpp
-        include/Logger.h
-        src/Logger.cpp
+    src/Logger.cpp
 )
 
 add_library(novakv_core ${NOVAKV_SOURCES})
