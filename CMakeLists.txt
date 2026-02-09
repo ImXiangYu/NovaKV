@@ -17,7 +17,7 @@ set(NOVAKV_SOURCES
 add_library(novakv_core ${NOVAKV_SOURCES})
 target_include_directories(novakv_core PUBLIC include)
 
-# --- 目标 1: 你的手动测试程序 (保留 main.cpp) ---
+# --- 目标 1: 手动测试程序 ---
 add_executable(nova_test main.cpp)
 target_link_libraries(nova_test PRIVATE novakv_core)
 
@@ -29,6 +29,15 @@ FetchContent_Declare(
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
+
+# --- 目标 3: Google Benchmark ---
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  benchmark
+  URL https://github.com/google/benchmark/archive/refs/heads/main.zip
+)
+FetchContent_MakeAvailable(benchmark)
 
 # 1. 搜集所有测试源码文件
 file(GLOB TEST_FILES "tests/*.cpp")
