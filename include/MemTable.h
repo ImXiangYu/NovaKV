@@ -8,6 +8,7 @@
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
+#include "Logger.h"
 #include "SkipList.h"
 #include "WalHandler.h"
 
@@ -62,13 +63,14 @@ class MemTable {
                     table_.delete_element(key);
                 }
             });
-            std::cout << "Recovery complete. Loaded " << table_.size() << " element(s)." << std::endl;
+            LOG_DEBUG(std::string("MemTable recovery complete. Loaded ")
+                      + std::to_string(table_.size()) + " element(s).");
         }
 
     public:
         // MemTable(int max_level = 16, const std::string& wal_file) : table_(max_level), wal_(wal_file) {}
         // 当构造函数中既有带默认值的参数，又有必须传递的参数时，C++ 规定：默认实参必须从右向左排列。
-        MemTable(const std::string& wal_file, int max_level = 16) : table_(max_level), wal_(wal_file) {
+        MemTable(const std::string& wal_file, int max_level = 16) : wal_(wal_file), table_(max_level) {
             // 启动时自动恢复
             RecoverFromWal();
         }

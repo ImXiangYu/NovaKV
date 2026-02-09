@@ -3,10 +3,10 @@
 //
 
 #include "WalHandler.h"
+#include "Logger.h"
 
 #include <array>
 #include <fstream>
-#include <iostream>
 
 uint32_t WalHandler::CalculateCRC32(const char* data, size_t len) {
     static const auto crc_table = []() {
@@ -31,10 +31,18 @@ uint32_t WalHandler::CalculateCRC32(const char* data, size_t len) {
 WalHandler::WalHandler(const std::string& filename) : filename_(filename) {
     // 以二进制、追加模式打开文件
     dest_.open(filename, std::ios::binary | std::ios::app);
+    if (!dest_.is_open()) {
+        LOG_ERROR(std::string("WAL open failed: ") + filename_);
+    } else {
+        LOG_INFO(std::string("WAL opened: ") + filename_);
+    }
 }
 
 WalHandler::~WalHandler() {
-    if (dest_.is_open()) dest_.close();
+    if (dest_.is_open()) {
+        dest_.close();
+        LOG_INFO(std::string("WAL closed: ") + filename_);
+    }
 }
 
 void WalHandler::AddLog(const std::string& key, const std::string& value, OpType type) {
@@ -95,7 +103,7 @@ void WalHandler::LoadLog(std::function<void(OpType, const std::string&, const st
         body.append(value);
 
         if (CalculateCRC32(body.data(), body.size()) != saved_crc) {
-            std::cerr << "WAL Checksum Mismatch! Data might be corrupted." << std::endl;
+            LOG_ERROR("WAL checksum mismatch: data might be corrupted.");
             break; // 或者跳过这条记录
         }
 

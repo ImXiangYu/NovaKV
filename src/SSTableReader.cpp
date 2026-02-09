@@ -5,13 +5,13 @@
 
 #include <cstring>
 #include <fcntl.h>
-#include <iostream>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <algorithm>
 
 #include "BloomFilter.h"
+#include "Logger.h"
 
 SSTableReader::SSTableReader(): fd_(-1), data_(MAP_FAILED), file_size_(0) {}
 
@@ -28,27 +28,28 @@ SSTableReader* SSTableReader::Open(const std::string &filename) {
     // 1. 打开文件 (POSIX 标准)
     int fd = open(filename.c_str(), O_RDONLY);
     if (fd < 0) {
-        perror("Failed to open file");
+        LOG_ERROR(std::string("Failed to open file: ") + filename);
         return nullptr;
     }
 
     // 2. 获取文件大小
     struct stat st{};
     if (fstat(fd, &st) != 0 || st.st_size < Footer::kEncodedLength) {
+        LOG_ERROR(std::string("Invalid SSTable size: ") + filename);
         close(fd);
         return nullptr;
     }
     size_t size = st.st_size;
-    std::cout << "[Debug] File size: " << size << std::endl;
+    LOG_DEBUG(std::string("SSTable file size: ") + std::to_string(size));
 
     // 3. 内存映射 (mmap)
     void* mmap_ptr = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (mmap_ptr == MAP_FAILED) {
-        perror("mmap failed");
+        LOG_ERROR(std::string("mmap failed: ") + filename);
         close(fd);
         return nullptr;
     }
-    std::cout << "[Debug] mmap pointer: " << mmap_ptr << std::endl;
+    LOG_DEBUG(std::string("mmap ok: ") + filename);
 
     // 4. 创建实例并初始化基本成员
     auto* reader = new SSTableReader();
@@ -58,22 +59,23 @@ SSTableReader* SSTableReader::Open(const std::string &filename) {
 
     // 5. 校验 Footer (这是进入 SSTable 世界的入场券)
     if (!reader->ReadFooter()) {
-        std::cerr << "Invalid SSTable file: Footer check failed." << std::endl;
+        LOG_ERROR(std::string("Invalid SSTable file (footer check failed): ") + filename);
         delete reader; // 析构函数会负责 munmap 和 close
         return nullptr;
     }
-    std::cout << "[Debug] Footer decoded." << std::endl;
+    LOG_DEBUG(std::string("Footer decoded: ") + filename);
 
     // 6. 加载索引
     if (!reader->ReadIndexBlock()) {
-        std::cerr << "Failed to read Index Block." << std::endl;
+        LOG_ERROR(std::string("Failed to read index block: ") + filename);
         delete reader;
         return nullptr;
     }
+    LOG_DEBUG(std::string("Index block entries: ") + std::to_string(reader->index_entries_.size()));
 
     // 7. 加载布隆过滤器
     if (!reader->ReadFilterBlock()) {
-        std::cerr << "Failed to read Filter Block." << std::endl;
+        LOG_WARN(std::string("Failed to read filter block: ") + filename);
         // 这里可以报错也可以不报错，取决于你是否允许没有过滤器的文件存在
     }
 
@@ -144,7 +146,7 @@ bool SSTableReader::Get(const std::string &key, std::string *value) {
     // 如果过滤器说肯定不在，直接返回 false，省去后面的索引查找和数据块解析
     if (!filter_data_.empty()) {
         if (!BloomFilter::KeyMayMatch(key, filter_data_)) {
-            std::cout << "[Debug] BloomFilter blocked key: " << key << std::endl;
+            LOG_DEBUG(std::string("BloomFilter blocked key: ") + key);
             return false;
         }
     }

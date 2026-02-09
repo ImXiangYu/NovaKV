@@ -6,6 +6,7 @@
 #define NOVAKV_WALHANDLER_H
 
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <string>
 

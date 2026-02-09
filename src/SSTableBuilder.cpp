@@ -3,8 +3,7 @@
 //
 
 #include "SSTableBuilder.h"
-
-#include <iostream>
+#include "Logger.h"
 
 SSTableBuilder::SSTableBuilder(WritableFile* file) : file_(file) {}
 
@@ -50,7 +49,8 @@ void SSTableBuilder::Finish() {
     file_->Append(footer_encoding);
 
     file_->Flush();
-    std::cout << "SSTable Build Finished. Total Size: " << file_->Size() << std::endl;
+    LOG_INFO(std::string("SSTable build finished. Total size: ")
+             + std::to_string(file_->Size()));
 }
 
 void SSTableBuilder::WriteDataBlock() {
@@ -70,10 +70,10 @@ void SSTableBuilder::WriteDataBlock() {
 
     // 5. 将这一块的信息记入索引条目（使用当前的 last_key_）
     index_entries_.push_back({last_key_, handle});
-
-    std::cout << "Flush Data Block: Offset=" << handle.offset
-              << ", Size=" << handle.size
-              << ", LastKey=" << last_key_ << std::endl;
+    LOG_DEBUG(std::string("Flush data block: offset=")
+              + std::to_string(handle.offset)
+              + ", size=" + std::to_string(handle.size)
+              + ", last_key=" + last_key_);
 }
 
 void SSTableBuilder::WriteIndexBlock() {
@@ -90,7 +90,8 @@ void SSTableBuilder::WriteIndexBlock() {
     }
 
     file_->Append(index_builder.Finish());
-    std::cout << "Index Block Written. Entries: " << index_entries_.size() << std::endl;
+    LOG_DEBUG(std::string("Index block written. Entries: ")
+              + std::to_string(index_entries_.size()));
 }
 
 void SSTableBuilder::WriteFilterBlock() {
@@ -104,7 +105,7 @@ void SSTableBuilder::WriteFilterBlock() {
     filter_handle_.size = filter_data.size();
 
     file_->Append(filter_data);
-
-    std::cout << "Filter Block Written. Offset=" << filter_handle_.offset
-              << ", Size=" << filter_handle_.size << " bytes." << std::endl;
+    LOG_DEBUG(std::string("Filter block written. Offset=")
+              + std::to_string(filter_handle_.offset)
+              + ", size=" + std::to_string(filter_handle_.size));
 }

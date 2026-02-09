@@ -59,6 +59,4 @@ TEST_F(SSTableBuilderTest, LayoutAndIndexTest) {
     EXPECT_GT(decoded_footer.index_handle.offset, 0);
     EXPECT_GT(decoded_footer.index_handle.size, 0);
 
-    std::cout << "Verified Footer: Index Offset=" << decoded_footer.index_handle.offset
-              << ", Index Size=" << decoded_footer.index_handle.size << std::endl;
 }

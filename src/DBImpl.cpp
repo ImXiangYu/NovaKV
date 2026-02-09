@@ -4,9 +4,9 @@
 
 #include "DBImpl.h"
 #include "FileFormats.h"
+#include "Logger.h"
 #include "SSTableBuilder.h"
 #include <filesystem>
-#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -17,6 +17,7 @@ DBImpl::DBImpl(std::string db_path)
     if (!fs::exists(db_path_)) {
         fs::create_directories(db_path_);
     }
+    LOG_INFO(std::string("DB path: ") + db_path_);
 
     // 2. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
@@ -25,7 +26,7 @@ DBImpl::DBImpl(std::string db_path)
 
     // 3. 执行启动恢复 (Recover)
     // 逻辑：如果目录下有旧的 WAL，说明之前有数据没落盘，通过“后门”接口塞进内存
-    std::cout << "[DB] Checking for recovery..." << std::endl;
+    LOG_INFO("Checking for recovery...");
     mem_->GetWalHandler()->LoadLog([this](OpType type, const std::string& k, const std::string& v) {
         if (type == OpType::ADD) {
             mem_->PutWithoutWal(k, v); // 关键：恢复时不写日志
@@ -33,7 +34,7 @@ DBImpl::DBImpl(std::string db_path)
             mem_->RemoveWithoutWal(k);
         }
     });
-    std::cout << "[DB] Recovery complete. Items in memory: " << mem_->Count() << std::endl;
+    LOG_INFO(std::string("Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
 }
 
 DBImpl::~DBImpl() {
@@ -50,7 +51,7 @@ void DBImpl::Put(const std::string &key, const std::string &value) {
         if (imm_ != nullptr) {
             // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
             // 后期我们会用后台线程来优化这里
-            std::cerr << "Wait: MinorCompaction is too slow..." << std::endl;
+            LOG_WARN("Wait: MinorCompaction is too slow...");
         }
         MinorCompaction();
     }
@@ -60,10 +61,11 @@ void DBImpl::Put(const std::string &key, const std::string &value) {
 }
 
 void DBImpl::MinorCompaction() {
-    std::cout << "[DB] Minor Compaction triggered..." << std::endl;
+    LOG_INFO("Minor Compaction triggered...");
 
     // 1. 冻结 mem_ 到 imm_
     imm_ = mem_;
+    LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm_->Count()));
 
     // 2. 开启全新的 mem_ 和新的 WAL 文件
     std::string new_wal = db_path_ + "/" + std::to_string(++next_file_number_) + ".wal";
@@ -84,13 +86,15 @@ void DBImpl::MinorCompaction() {
         }
         builder.Finish();
         file.Flush();
-        std::cout << "[DB] SSTable created: " << sst_path << std::endl;
+        LOG_INFO(std::string("SSTable created: ") + sst_path);
     }
 
     if (SSTableReader* reader = SSTableReader::Open(sst_path)) {
         // 记得加锁，防止 Get 操作同时遍历 readers_
         std::lock_guard<std::mutex> lock(mutex_);
         readers_.push_back(reader);
+    } else {
+        LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
 
     // 4. 清理：释放 imm_ 的内存
@@ -118,12 +122,14 @@ void DBImpl::Recover() {
 bool DBImpl::Get(const std::string& key, std::string& value) {
     // 第一级：查找活跃内存 (MemTable)
     if (mem_ && mem_->Get(key, value)) {
+        LOG_DEBUG(std::string("Get hit: memtable key=") + key);
         return true;
     }
 
     // 第二级：查找只读内存 (Immutable MemTable)
     // 注意：如果 MinorCompaction 正在进行，imm_ 里的数据也是最新的
     if (imm_ && imm_->Get(key, value)) {
+        LOG_DEBUG(std::string("Get hit: immutable memtable key=") + key);
         return true;
     }
 
@@ -131,6 +137,7 @@ bool DBImpl::Get(const std::string& key, std::string& value) {
     // 越晚生成的 SST 文件，数据越新，所以要逆序遍历
     for (int i = readers_.size() - 1; i >= 0; --i) {
         if (readers_[i]->Get(key, &value)) {
+            LOG_DEBUG(std::string("Get hit: sstable key=") + key);
             return true;
         }
     }
