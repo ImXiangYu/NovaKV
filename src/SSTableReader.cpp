@@ -214,6 +214,35 @@ bool SSTableReader::ReadFilterBlock() {
 
     return true;
 }
+void SSTableReader::ForEach(const std::function<void(const std::string&, const std::string&)>& cb) const {
+    for (const auto& entry : index_entries_) {
+        uint64_t pos = 0;
+        const uint64_t block_size = entry.handle.size;
+        const char* block_ptr = static_cast<const char*>(data_) + entry.handle.offset;
+
+        while (pos < block_size) {
+            if (pos + sizeof(uint32_t) > block_size) break;
+            uint32_t key_len;
+            std::memcpy(&key_len, block_ptr + pos, sizeof(uint32_t));
+            pos += sizeof(uint32_t);
+
+            if (pos + key_len > block_size) break;
+            std::string key(block_ptr + pos, key_len);
+            pos += key_len;
+
+            if (pos + sizeof(uint32_t) > block_size) break;
+            uint32_t val_len;
+            std::memcpy(&val_len, block_ptr + pos, sizeof(uint32_t));
+            pos += sizeof(uint32_t);
+
+            if (pos + val_len > block_size) break;
+            std::string value(block_ptr + pos, val_len);
+            pos += val_len;
+
+            cb(key, value);
+        }
+    }
+}
 
 
 

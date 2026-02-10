@@ -4,6 +4,7 @@
 
 #ifndef NOVAKV_SSTABLEREADER_H
 #define NOVAKV_SSTABLEREADER_H
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,9 @@ class SSTableReader {
 
         // 查询 Key
         bool Get(const std::string& key, std::string* value);
+
+        // 遍历/导出
+        void ForEach(const std::function<void(const std::string &, const std::string &)> &cb) const;
     private:
         // 私有构造函数，防止外部直接 new
         SSTableReader();
@@ -26,7 +30,6 @@ class SSTableReader {
         // 内部读取逻辑
         bool ReadFooter();
         bool ReadIndexBlock();
-
         bool ReadFilterBlock();
 
         // 资源句柄
