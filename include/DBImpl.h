@@ -19,6 +19,8 @@ class DBImpl {
 
         void Put(const std::string& key, const std::string& value);
         bool Get(const std::string& key, std::string& value);
+        void CompactL0ToL1();
+        size_t LevelSize(size_t level) const;
 
     private:
         void MinorCompaction();

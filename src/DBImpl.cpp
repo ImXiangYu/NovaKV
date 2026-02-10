@@ -7,6 +7,7 @@
 #include "Logger.h"
 #include "SSTableBuilder.h"
 #include <filesystem>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -123,6 +124,47 @@ void DBImpl::Recover() {
     });
 }
 
+void DBImpl::CompactL0ToL1() {
+    // 先判空，无需合并
+    if (levels_[0].empty()) return;
+    std::map<std::string, std::string> mp;
+    // 倒序遍历levels_[0]
+    for (auto it = levels_[0].rbegin(); it != levels_[0].rend(); ++it) {
+        (*it)->ForEach([&](const std::string &key, const std::string &value) {
+            if (!mp.count(key)) {mp[key] = value;}
+        });
+    }
+
+    // 合并前先判空
+    if (mp.empty()) return;
+
+    std::string new_sst_path = db_path_ + "/" + std::to_string(++next_file_number_) + ".sst";
+
+    WritableFile file(new_sst_path);
+    SSTableBuilder builder(&file);
+
+    for (const auto& pair : mp) {
+        builder.Add(pair.first, pair.second);
+    }
+    builder.Finish();
+    file.Flush();
+
+    if (SSTableReader* reader = SSTableReader::Open(new_sst_path)) {
+        LOG_INFO(std::string("SSTable created: ") + new_sst_path);
+        // 暂不做 L1 合并，后续会引入更低层压实
+        levels_[1].push_back(reader);
+    }
+
+    for (auto reader : levels_[0]) {
+        delete reader;
+    }
+    levels_[0].clear();
+}
+
+size_t DBImpl::LevelSize(const size_t level) const {
+    return levels_[level].size();
+}
+
 bool DBImpl::Get(const std::string& key, std::string& value) {
     // 第一级：查找活跃内存 (MemTable)
     if (mem_ && mem_->Get(key, value)) {
@@ -148,7 +190,7 @@ bool DBImpl::Get(const std::string& key, std::string& value) {
     }
 
     // 再倒序遍历 levels_[1]（L1 新到旧）
-    for (size_t i = levels_[0].size(); i-- > 0;) {
+    for (size_t i = levels_[1].size(); i-- > 0;) {
         if (levels_[1][i]->Get(key, &value)) {
             LOG_DEBUG(std::string("Get hit in L1: sstable key=") + key);
             return true;
