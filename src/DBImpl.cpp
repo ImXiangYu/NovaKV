@@ -141,7 +141,13 @@ void DBImpl::CompactL0ToL1() {
     }
 
     // 合并前先判空
-    if (mp.empty()) return;
+    if (mp.empty()) {
+        for (auto reader : levels_[0]) {
+            delete reader;
+        }
+        levels_[0].clear();
+        return;
+    }
 
     std::string new_sst_path = db_path_ + "/" + std::to_string(++next_file_number_) + ".sst";
 
@@ -167,6 +173,7 @@ void DBImpl::CompactL0ToL1() {
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {
+    if (level >= levels_.size()) return 0;
     return levels_[level].size();
 }
 
