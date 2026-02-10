@@ -19,12 +19,16 @@ DBImpl::DBImpl(std::string db_path)
     }
     LOG_INFO(std::string("DB path: ") + db_path_);
 
-    // 2. 初始化第一个活跃的 MemTable
+    // 2. 初始化levels_
+    // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
+    levels_.resize(2);
+
+    // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
     std::string wal_path = db_path_ + "/0.wal";
     mem_ = new MemTable<std::string, std::string>(wal_path);
 
-    // 3. 执行启动恢复 (Recover)
+    // 4. 执行启动恢复 (Recover)
     // 逻辑：如果目录下有旧的 WAL，说明之前有数据没落盘，通过“后门”接口塞进内存
     LOG_INFO("Checking for recovery...");
     mem_->GetWalHandler()->LoadLog([this](OpType type, const std::string& k, const std::string& v) {
@@ -89,10 +93,10 @@ void DBImpl::MinorCompaction() {
         LOG_INFO(std::string("SSTable created: ") + sst_path);
     }
 
-    if (SSTableReader* reader = SSTableReader::Open(sst_path)) {
-        // 记得加锁，防止 Get 操作同时遍历 readers_
+    if (SSTableReader* level = SSTableReader::Open(sst_path)) {
+        // 记得加锁，防止 Get 操作同时遍历 levels[0]
         std::lock_guard<std::mutex> lock(mutex_);
-        readers_.push_back(reader);
+        levels_[0].push_back(level);
     } else {
         LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
@@ -135,9 +139,18 @@ bool DBImpl::Get(const std::string& key, std::string& value) {
 
     // 第三级：查找磁盘 SSTable (从新到旧)
     // 越晚生成的 SST 文件，数据越新，所以要逆序遍历
-    for (int i = readers_.size() - 1; i >= 0; --i) {
-        if (readers_[i]->Get(key, &value)) {
-            LOG_DEBUG(std::string("Get hit: sstable key=") + key);
+    // 先倒序遍历 levels_[0]（L0 新到旧）
+    for (size_t i = levels_[0].size(); i-- > 0;) {
+        if (levels_[0][i]->Get(key, &value)) {
+            LOG_DEBUG(std::string("Get hit in L0: sstable key=") + key);
+            return true;
+        }
+    }
+
+    // 再倒序遍历 levels_[1]（L1 新到旧）
+    for (size_t i = levels_[0].size(); i-- > 0;) {
+        if (levels_[1][i]->Get(key, &value)) {
+            LOG_DEBUG(std::string("Get hit in L1: sstable key=") + key);
             return true;
         }
     }

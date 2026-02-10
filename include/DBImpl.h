@@ -32,7 +32,8 @@ class DBImpl {
         MemTable<std::string, std::string>* imm_;
 
         // 磁盘层：已打开的 SST 列表
-        std::vector<SSTableReader*> readers_;
+        // levels_[0] 是 L0，levels_[1] 是 L1
+        std::vector<std::vector<SSTableReader*>> levels_;
 
         // 保护元数据和 mem/imm 切换的锁
         std::mutex mutex_;
