@@ -102,7 +102,12 @@ void DBImpl::MinorCompaction() {
         LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
 
-    // 4. 清理：释放 imm_ 的内存
+    // 4. 触发Compact
+    if (levels_[0].size() >= 2) {
+        CompactL0ToL1();
+    }
+
+    // 5. 清理：释放 imm_ 的内存
     // 在工业级实现里，这里还要删除对应的旧 WAL 文件，我们先只释放指针
     delete imm_;
     imm_ = nullptr;
