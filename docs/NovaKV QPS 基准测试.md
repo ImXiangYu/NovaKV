@@ -22,5 +22,23 @@ BenchPut       261835 ns        20951 ns        10000 items_per_second=47.7311k/
 BenchGet         1537 ns         1407 ns       522563 items_per_second=710.972k/s
 ```
 
-
+启用自动 L0→L1 合并
+```
+2026-02-10T22:58:24+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688.01 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 1.10, 0.60, 0.30
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       187369 ns        16945 ns        38576 items_per_second=59.0151k/s
+BenchGet         1509 ns         1379 ns       514553 items_per_second=724.957k/s
+```
 
