@@ -63,3 +63,24 @@ BenchPut       182854 ns        17704 ns        39695 items_per_second=56.4851k/
 BenchGet         1389 ns         1254 ns       581658 items_per_second=797.601k/s
 ```
 
+新增 tombstone 持久化/读取/遍历遮蔽，SSTable 读路径对删除标记生效
+
+```
+2026-02-11T22:39:42+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 0.14, 0.26, 0.21
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       193830 ns        18040 ns        35727 items_per_second=55.432k/s
+BenchGet         1475 ns         1328 ns       498411 items_per_second=752.784k/s
+```
+
