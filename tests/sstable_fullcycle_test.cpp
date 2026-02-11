@@ -8,6 +8,11 @@
 #include <filesystem>
 #include <map>
 
+struct ValueRecord {
+    ValueType type;
+    std::string value;
+};
+
 class SSTableFullCycleTest : public ::testing::Test {
 protected:
     const std::string test_file = "full_test.sst";
@@ -71,5 +76,39 @@ TEST_F(SSTableFullCycleTest, MassiveDataAndRandomRead) {
     EXPECT_FALSE(reader->Get("key_00000_extra", &dummy));
 
     // 5. 资源清理
+    delete reader;
+}
+
+TEST_F(SSTableFullCycleTest, TombstoneEntryIsHidden) {
+    {
+        WritableFile file(test_file);
+        SSTableBuilder builder(&file);
+        builder.Add("a", "va", ValueType::kValue);
+        builder.Add("b", "", ValueType::kDeletion);
+        builder.Add("c", "vc", ValueType::kValue);
+        builder.Finish();
+    }
+
+    SSTableReader* reader = SSTableReader::Open(test_file);
+    ASSERT_NE(reader, nullptr) << "Failed to open SSTable via Reader!";
+
+    std::string val;
+    EXPECT_TRUE(reader->Get("a", &val));
+    EXPECT_EQ(val, "va");
+    EXPECT_FALSE(reader->Get("b", &val));
+    EXPECT_TRUE(reader->Get("c", &val));
+    EXPECT_EQ(val, "vc");
+
+    std::map<std::string, ValueRecord> actual;
+    reader->ForEach([&actual](const std::string& key, const std::string& value, ValueType type) {
+        if (type == ValueType::kValue) {
+            actual[key].value = value;
+        }
+    });
+    EXPECT_EQ(actual.size(), 2u);
+    EXPECT_EQ(actual["a"].value, "va");
+    EXPECT_EQ(actual["c"].value, "vc");
+    EXPECT_EQ(actual.count("b"), 0u);
+
     delete reader;
 }
