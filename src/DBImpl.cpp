@@ -52,7 +52,21 @@ DBImpl::~DBImpl() {
     if (mem_->Count() > 0) {
         MinorCompaction();
     }
+
+    for (auto& level : levels_) {
+        for (const auto& reader : level) {
+            delete reader;
+        }
+        level.clear();
+    }
+
+    // 如果imm_非空，也清理掉
+    delete imm_;
+    imm_ = nullptr;
+
+    // 清理mem_
     delete mem_;
+    mem_ = nullptr;
 }
 
 void DBImpl::Put(const std::string &key, const std::string &value) {

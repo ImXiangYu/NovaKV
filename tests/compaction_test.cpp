@@ -91,3 +91,15 @@ TEST_F(CompactionTest, RecoverSSTablesOnStartup) {
     EXPECT_TRUE(db_recovered.Get("k_10", val));
     EXPECT_EQ(val, "v_10");
 }
+
+TEST_F(CompactionTest, DestructorCleansUpReaders) {
+    {
+        DBImpl db(test_db_path);
+        for (int i = 0; i < 1000; ++i) {
+            db.Put("k_" + std::to_string(i), "v_" + std::to_string(i));
+        }
+        db.Put("trigger", "x"); // 触发一次落盘，确保有 SSTable reader
+    }
+
+    SUCCEED();
+}
