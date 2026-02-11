@@ -26,6 +26,8 @@ class WalHandler {
     public:
         explicit WalHandler(const std::string& filename);
         ~WalHandler();
+        // 获取文件名
+        std::string GetFilename() const;
 
         // 核心接口：将 KV 操作持久化
         void AddLog(const std::string& key, const std::string& value, OpType type);

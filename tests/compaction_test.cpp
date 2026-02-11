@@ -76,3 +76,18 @@ TEST_F(CompactionTest, AutoL0ToL1CompactionTriggeredOnThreshold) {
     EXPECT_TRUE(db.Get("dup", val));
     EXPECT_EQ(val, "new");
 }
+
+TEST_F(CompactionTest, RecoverSSTablesOnStartup) {
+    {
+        DBImpl db(test_db_path);
+        for (int i = 0; i < 1000; ++i) {
+            db.Put("k_" + std::to_string(i), "v_" + std::to_string(i));
+        }
+        db.Put("trigger", "x");
+    }
+
+    DBImpl db_recovered(test_db_path);
+    std::string val;
+    EXPECT_TRUE(db_recovered.Get("k_10", val));
+    EXPECT_EQ(val, "v_10");
+}

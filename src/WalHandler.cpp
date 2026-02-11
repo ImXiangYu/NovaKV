@@ -45,6 +45,10 @@ WalHandler::~WalHandler() {
     }
 }
 
+std::string WalHandler::GetFilename() const {
+    return filename_;
+}
+
 void WalHandler::AddLog(const std::string& key, const std::string& value, OpType type) {
     // 1. 拼凑整个 Body 内容
     std::string payload;

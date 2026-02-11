@@ -8,6 +8,8 @@
 #include "SSTableBuilder.h"
 #include <filesystem>
 #include <map>
+#include <algorithm>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
@@ -23,6 +25,9 @@ DBImpl::DBImpl(std::string db_path)
     // 2. 初始化levels_
     // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
     levels_.resize(2);
+
+    // 调用LoadSSTables()恢复数据
+    LoadSSTables();
 
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
@@ -67,6 +72,7 @@ void DBImpl::Put(const std::string &key, const std::string &value) {
 
 void DBImpl::MinorCompaction() {
     LOG_INFO("Minor Compaction triggered...");
+    std::string old_wal_path = mem_->GetWalPath();
 
     // 1. 冻结 mem_ 到 imm_
     imm_ = mem_;
@@ -96,8 +102,17 @@ void DBImpl::MinorCompaction() {
 
     if (SSTableReader* level = SSTableReader::Open(sst_path)) {
         // 记得加锁，防止 Get 操作同时遍历 levels[0]
-        std::lock_guard<std::mutex> lock(mutex_);
-        levels_[0].push_back(level);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            levels_[0].push_back(level);
+        }
+        // 删除旧 WAL 文件
+        if (std::filesystem::exists(old_wal_path)) {
+            std::filesystem::remove(old_wal_path);
+            LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
+        } else {
+            LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
+        }
     } else {
         LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
@@ -128,7 +143,38 @@ void DBImpl::Recover() {
         }
     });
 }
-
+void DBImpl::LoadSSTables() {
+    LOG_INFO(std::string("LoadSSTables start"));
+    std::vector<std::pair<int, std::string>> sstables;
+    int max_id = 0;
+    for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
+        // 如果每一条的扩展名是.sst，就记录下来
+        if (entry.is_regular_file()) {
+            if (entry.path().extension() == ".sst") {
+                std::string stem = entry.path().stem().string();
+                // 如果不是全数字就跳过
+                if (!std::all_of(stem.begin(), stem.end(),
+                                 [](const unsigned char c) { return std::isdigit(c); })) {
+                    continue;
+                }
+                int id = std::stoi(stem);
+                sstables.emplace_back(id, entry.path().string());
+                max_id = std::max(max_id, id);
+            }
+        }
+    }
+    // 之后把sstables从小到大排序，排序后重新Open加到levels_[0]即可
+    std::sort(sstables.begin(), sstables.end());
+    next_file_number_ = std::max(next_file_number_, max_id);
+    for (const auto & sstable : sstables) {
+        if (SSTableReader* reader = SSTableReader::Open(sstable.second)) {
+            LOG_INFO(std::string("SSTable recovery: ") + sstable.second);
+            // 加回levels_[0]
+            levels_[0].push_back(reader);
+        }
+    }
+    LOG_INFO(std::string("LoadSSTables completed"));
+}
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
     if (levels_[0].empty()) return;

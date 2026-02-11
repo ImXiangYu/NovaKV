@@ -25,6 +25,7 @@ class DBImpl {
     private:
         void MinorCompaction();
         void Recover(); // 关键：启动时自动恢复逻辑
+        void LoadSSTables();
 
         std::string db_path_;
         int next_file_number_;

@@ -137,6 +137,11 @@ class MemTable {
             // 或者在 SkipList 里维护一个精确的 byte_counter
             return table_.size() * 128;
         }
+
+        // 获取Path
+        std::string GetWalPath() const {
+            return wal_.GetFilename();
+        }
 };
 
 #endif //NOVAKV_MEMTABLE_H
