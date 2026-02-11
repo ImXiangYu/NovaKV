@@ -40,7 +40,7 @@ TEST_F(SSTableFullCycleTest, MassiveDataAndRandomRead) {
         WritableFile file(test_file);
         SSTableBuilder builder(&file);
         for (const auto& [key, val] : mock_data) {
-            builder.Add(key, val);
+            builder.Add(key, val, ValueType::kValue);
         }
         builder.Finish();
         // builder 析构，文件关闭

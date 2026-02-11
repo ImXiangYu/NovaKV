@@ -12,6 +12,7 @@
 
 #include "BloomFilter.h"
 #include "Logger.h"
+#include "WalHandler.h"
 
 SSTableReader::SSTableReader(): fd_(-1), data_(MAP_FAILED), file_size_(0) {}
 
@@ -180,6 +181,15 @@ bool SSTableReader::Get(const std::string &key, std::string *value) {
         std::string curr_key(block_ptr + pos, curr_key_len);
         pos += curr_key_len;
 
+        // 解析ValueType
+        uint8_t vtype;
+        memcpy(&vtype, block_ptr + pos, sizeof(uint8_t));
+        const auto type = static_cast<ValueType>(vtype);
+        pos += sizeof(uint8_t);
+
+        // 直接先读Type，如果type是kDeletion，直接返回false，说明已经删了
+        if (type == ValueType::kDeletion) return false;
+
         // 解析 ValLen
         uint32_t val_len;
         memcpy(&val_len, block_ptr + pos, sizeof(uint32_t));
@@ -229,6 +239,13 @@ void SSTableReader::ForEach(const std::function<void(const std::string&, const s
             if (pos + key_len > block_size) break;
             std::string key(block_ptr + pos, key_len);
             pos += key_len;
+
+            if (pos + sizeof(uint8_t) > block_size) break;
+            uint8_t vtype;
+            memcpy(&vtype, block_ptr + pos, sizeof(uint8_t));
+            const auto type = static_cast<ValueType>(vtype);
+            if (type == ValueType::kDeletion) {continue;}
+            pos += sizeof(uint8_t);
 
             if (pos + sizeof(uint32_t) > block_size) break;
             uint32_t val_len;

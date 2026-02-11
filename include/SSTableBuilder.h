@@ -8,6 +8,7 @@
 #include "BlockBuilder.h"
 #include "FileFormats.h"
 #include "Storage.h"
+#include "WalHandler.h"
 #include <vector>
 #include <string>
 
@@ -19,7 +20,7 @@ class SSTableBuilder {
         ~SSTableBuilder() = default;
 
         // 核心接口：添加一条数据
-        void Add(const std::string& key, const std::string& value);
+        void Add(const std::string& key, const std::string& value, ValueType type);
 
         // 将内存里剩下的数据全部刷入磁盘，并写下索引和 Footer
         void Finish();

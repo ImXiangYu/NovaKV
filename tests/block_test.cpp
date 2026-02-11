@@ -27,26 +27,26 @@ TEST_F(BlockBuilderTest, EmptyInitially) {
 }
 
 // 测试 2：验证单条记录写入后的长度计算
-// 布局：KeyLen(4) + "key1"(4) + ValLen(4) + "value1"(6) = 18 字节
+// 布局：KeyLen(4) + "key1"(4) + ValueType(1) + ValLen(4) + "value1"(6) = 19 字节
 TEST_F(BlockBuilderTest, AddSingleEntry) {
-    builder_->Add("key1", "value1");
+    builder_->Add("key1", "value1", ValueType::kValue);
 
     EXPECT_FALSE(builder_->Empty());
-    // 4 + 4 + 4 + 6 = 18
-    EXPECT_EQ(builder_->CurrentSizeEstimate(), 18);
+    // 4 + 4 + 1 + 4 + 6 = 19
+    EXPECT_EQ(builder_->CurrentSizeEstimate(), 19);
 }
 
 // 测试 3 : 验证多条记录连续写入
 TEST_F(BlockBuilderTest, AddMultipleEntries) {
-    builder_->Add("k1", "v1"); // 4+2 + 4+2 = 12
-    builder_->Add("k2", "v2"); // 12 + 12 = 24
+    builder_->Add("k1", "v1", ValueType::kValue); // 4+2 + 1 + 4+2 = 13
+    builder_->Add("k2", "v2", ValueType::kValue); // 13 + 13 = 26
 
-    EXPECT_EQ(builder_->CurrentSizeEstimate(), 24);
+    EXPECT_EQ(builder_->CurrentSizeEstimate(), 26);
 }
 
 // 测试 4：验证 Reset 功能是否清空数据
 TEST_F(BlockBuilderTest, ResetLogic) {
-    builder_->Add("test", "data");
+    builder_->Add("test", "data", ValueType::kValue);
     builder_->Reset();
 
     EXPECT_TRUE(builder_->Empty());
@@ -57,10 +57,10 @@ TEST_F(BlockBuilderTest, ResetLogic) {
 TEST_F(BlockBuilderTest, FinishReturnsData) {
     std::string k = "hi";
     std::string v = "world";
-    builder_->Add(k, v);
+    builder_->Add(k, v, ValueType::kValue);
 
     std::string result = builder_->Finish();
-    EXPECT_EQ(result.size(), 4 + 2 + 4 + 5);
+    EXPECT_EQ(result.size(), 4 + 2 + 1 + 4 + 5);
     // 验证前 4 个字节是否记录了长度 2
     uint32_t len;
     memcpy(&len, result.data(), sizeof(uint32_t));

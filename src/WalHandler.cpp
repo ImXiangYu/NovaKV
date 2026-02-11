@@ -49,7 +49,7 @@ std::string WalHandler::GetFilename() const {
     return filename_;
 }
 
-void WalHandler::AddLog(const std::string& key, const std::string& value, OpType type) {
+void WalHandler::AddLog(const std::string& key, const std::string& value, ValueType type) {
     // 1. 拼凑整个 Body 内容
     std::string payload;
     uint8_t t = static_cast<uint8_t>(type);
@@ -74,7 +74,7 @@ void WalHandler::AddLog(const std::string& key, const std::string& value, OpType
     dest_.flush();
 }
 
-void WalHandler::LoadLog(std::function<void(OpType, const std::string&, const std::string&)> callback) {
+void WalHandler::LoadLog(std::function<void(ValueType, const std::string&, const std::string&)> callback) {
     std::ifstream src(filename_, std::ios::binary);
     if (!src.is_open()) return;
     while (src.peek() != EOF) {
@@ -112,7 +112,7 @@ void WalHandler::LoadLog(std::function<void(OpType, const std::string&, const st
         }
 
         // 4. 通过回调函数，把恢复出来的 KV 交给 MemTable 处理
-        callback(static_cast<OpType>(t), key, value);
+        callback(static_cast<ValueType>(t), key, value);
     }
     src.close();
 }

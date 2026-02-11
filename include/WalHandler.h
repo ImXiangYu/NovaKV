@@ -10,9 +10,10 @@
 #include <functional>
 #include <string>
 
-enum class OpType : uint8_t {
-    ADD = 1,
-    DEL = 2
+enum class ValueType : uint8_t {
+    // kValue为正常Value, kDeletion为已删除值
+    kValue = 1,
+    kDeletion = 2
 };
 
 class WalHandler {
@@ -30,9 +31,9 @@ class WalHandler {
         std::string GetFilename() const;
 
         // 核心接口：将 KV 操作持久化
-        void AddLog(const std::string& key, const std::string& value, OpType type);
+        void AddLog(const std::string& key, const std::string& value, ValueType type);
 
-        void LoadLog(std::function<void(OpType, const std::string&, const std::string&)> callback);
+        void LoadLog(std::function<void(ValueType, const std::string&, const std::string&)> callback);
 };
 
 #endif //NOVAKV_WALHANDLER_H

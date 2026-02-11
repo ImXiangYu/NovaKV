@@ -42,7 +42,7 @@ TEST_F(SSTableReaderForEachTest, ForEachReturnsAllKeyValues) {
         WritableFile file(test_file);
         SSTableBuilder builder(&file);
         for (const auto& [key, value] : expected) {
-            builder.Add(key, value);
+            builder.Add(key, value, ValueType::kValue);
         }
         builder.Finish();
     }

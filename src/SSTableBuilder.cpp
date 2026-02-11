@@ -7,14 +7,14 @@
 
 SSTableBuilder::SSTableBuilder(WritableFile* file) : file_(file) {}
 
-void SSTableBuilder::Add(const std::string& key, const std::string& value) {
+void SSTableBuilder::Add(const std::string& key, const std::string& value, ValueType type) {
     // 1. 如果当前 BlockBuilder 已经够大了（如 4KB），执行 Flush()
     if (data_block_.CurrentSizeEstimate() >= 4096) {
         WriteDataBlock();
     }
 
     // 2. 将数据喂给 BlockBuilder
-    data_block_.Add(key, value);
+    data_block_.Add(key, value, type);
     // 收集 Key 用于布隆过滤器
     keys_.push_back(key);
 
@@ -86,7 +86,7 @@ void SSTableBuilder::WriteIndexBlock() {
         handle_encoding.append(reinterpret_cast<const char*>(&entry.handle.offset), sizeof(uint64_t));
         handle_encoding.append(reinterpret_cast<const char*>(&entry.handle.size), sizeof(uint64_t));
 
-        index_builder.Add(entry.last_key, handle_encoding);
+        index_builder.Add(entry.last_key, handle_encoding, ValueType::kValue);
     }
 
     file_->Append(index_builder.Finish());

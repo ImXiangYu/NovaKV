@@ -8,15 +8,17 @@
 #include <cstdint>
 #include <string>
 
+#include "WalHandler.h"
+
 class BlockBuilder {
     public:
         BlockBuilder() = default;
 
         /**
          * @brief 添加一个键值对到缓冲区
-         * 布局：[KeyLen (4B)] [Key 内容] [ValueLen (4B)] [Value 内容]
+         * 布局：[KeyLen (4B)] [Key 内容] [ValueType(1B)] [ValueLen (4B)] [Value 内容]
          */
-        void Add(const std::string& key, const std::string& value);
+        void Add(const std::string& key, const std::string& value, ValueType type);
 
         /**
          * @brief 完成当前块的构建

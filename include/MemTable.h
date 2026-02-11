@@ -51,15 +51,15 @@ class MemTable {
             // 加个写锁
             std::unique_lock<std::shared_mutex> lock(rw_lock_);
             // 调用 WalHandler 的 LoadLog，并传入 Lambda 作为回调
-            wal_.LoadLog([this](OpType type, const std::string& k_str, const std::string& v_str) {
+            wal_.LoadLog([this](ValueType type, const std::string& k_str, const std::string& v_str) {
                 // 1. 将字符串还原为原始的 K 和 V 类型
                 K key = Deserialize<K>(k_str);
                 V val = Deserialize<V>(v_str);
 
                 // 2. 重放操作
-                if (type == OpType::ADD) {
+                if (type == ValueType::kValue) {
                     table_.insert_element(key, val);
-                } else if (type == OpType::DEL) {
+                } else if (type == ValueType::kDeletion) {
                     table_.delete_element(key);
                 }
             });
@@ -81,7 +81,8 @@ class MemTable {
             // 加个写锁，确保同一时间只有一个线程在修改SkipList
             std::unique_lock<std::shared_mutex> lock(rw_lock_);
             // 关键：先写日志，再改内存！
-            wal_.AddLog(Serialize(key), Serialize(value), OpType::ADD);
+            // Put 写 kValue, Remove 写 kDeletion
+            wal_.AddLog(Serialize(key), Serialize(value), ValueType::kValue);
             // 加锁后直接调用insert方式
             table_.insert_element(key, value);
         }
@@ -96,7 +97,8 @@ class MemTable {
             // 同样要加写锁
             std::unique_lock<std::shared_mutex> lock(rw_lock_);
             // 关键：先写日志，再改内存！
-            wal_.AddLog(Serialize(key), "", OpType::DEL);
+            // Put 写 kValue, Remove 写 kDeletion
+            wal_.AddLog(Serialize(key), "", ValueType::kDeletion);
             // 加锁后直接调用delete
             return table_.delete_element(key);
         }

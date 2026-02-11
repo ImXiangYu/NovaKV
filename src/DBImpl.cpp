@@ -37,10 +37,10 @@ DBImpl::DBImpl(std::string db_path)
     // 4. 执行启动恢复 (Recover)
     // 逻辑：如果目录下有旧的 WAL，说明之前有数据没落盘，通过“后门”接口塞进内存
     LOG_INFO("Checking for recovery...");
-    mem_->GetWalHandler()->LoadLog([this](OpType type, const std::string& k, const std::string& v) {
-        if (type == OpType::ADD) {
+    mem_->GetWalHandler()->LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
+        if (type == ValueType::kValue) {
             mem_->PutWithoutWal(k, v); // 关键：恢复时不写日志
-        } else if (type == OpType::DEL) {
+        } else if (type == ValueType::kDeletion) {
             mem_->RemoveWithoutWal(k);
         }
     });
@@ -104,9 +104,9 @@ void DBImpl::MinorCompaction() {
         WritableFile file(sst_path);
         SSTableBuilder builder(&file);
 
-        auto it = imm_->GetIterator(); // 利用你实现的迭代器
+        auto it = imm_->GetIterator();
         while (it.Valid()) {
-            builder.Add(it.key(), it.value());
+            builder.Add(it.key(), it.value(), ValueType::kValue);
             it.Next();
         }
         builder.Finish();
@@ -149,8 +149,8 @@ void DBImpl::Recover() {
 
     // 这里利用你写好的 LoadLog 回调逻辑
     // WalHandler 会自动校验 CRC，数据不全或损坏会自动 break
-    mem_->GetWalHandler()->LoadLog([this](OpType type, const std::string& k, const std::string& v) {
-        if (type == OpType::ADD) {
+    mem_->GetWalHandler()->LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
+        if (type == ValueType::kValue) {
             mem_->PutWithoutWal(k, v); // 恢复时只需写内存，不再写 WAL
         } else {
             mem_->RemoveWithoutWal(k);
@@ -215,7 +215,7 @@ void DBImpl::CompactL0ToL1() {
     SSTableBuilder builder(&file);
 
     for (const auto& pair : mp) {
-        builder.Add(pair.first, pair.second);
+        builder.Add(pair.first, pair.second, ValueType::kValue);
     }
     builder.Finish();
     file.Flush();

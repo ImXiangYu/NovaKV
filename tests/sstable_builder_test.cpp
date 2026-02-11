@@ -34,7 +34,7 @@ class SSTableBuilderTest : public ::testing::Test {
 TEST_F(SSTableBuilderTest, LayoutAndIndexTest) {
     // 1. 前面的 Add 和 Finish 逻辑保持不变...
     for (int i = 0; i < 100; ++i) {
-        builder_->Add("key_" + std::to_string(i), std::string(100, 'x'));
+        builder_->Add("key_" + std::to_string(i), std::string(100, 'x'), ValueType::kValue);
     }
     builder_->Finish();
     file_->Close();
