@@ -108,7 +108,7 @@ bool SSTableReader::ReadIndexBlock() {
     const char* index_ptr = static_cast<const char*>(data_) + offset;
 
     // 3. 解析二进制数据
-    // 提示：我们在写入时是按照 [KeyLen][Key][Offset][Size] 循环写入的
+    // 提示：我们在写入时是按照 [KeyLen][Key][ValueType][Offset][Size] 循环写入的
     uint64_t pos = 0;
     while (pos < size) {
         IndexEntry entry;
@@ -121,6 +121,11 @@ bool SSTableReader::ReadIndexBlock() {
         // 读取 Key 字符串
         entry.last_key.assign(index_ptr + pos, key_len);
         pos += key_len;
+
+        // 读取 ValueType
+        uint8_t type;
+        std::memcpy(&type, index_ptr + pos, sizeof(uint8_t));
+        pos += sizeof(uint8_t);
 
         // 读取 Value 长度 (uint32_t)，其实就是一个标准BlockHandle
         uint32_t val_len;
@@ -187,9 +192,6 @@ bool SSTableReader::Get(const std::string &key, std::string *value) {
         const auto type = static_cast<ValueType>(vtype);
         pos += sizeof(uint8_t);
 
-        // 直接先读Type，如果type是kDeletion，直接返回false，说明已经删了
-        if (type == ValueType::kDeletion) return false;
-
         // 解析 ValLen
         uint32_t val_len;
         memcpy(&val_len, block_ptr + pos, sizeof(uint32_t));
@@ -197,6 +199,7 @@ bool SSTableReader::Get(const std::string &key, std::string *value) {
 
         // 匹配检查
         if (curr_key == key) {
+            if (type == ValueType::kDeletion) return false;
             value->assign(block_ptr + pos, val_len);
             return true; // 找到了！
         }
@@ -244,7 +247,6 @@ void SSTableReader::ForEach(const std::function<void(const std::string&, const s
             uint8_t vtype;
             memcpy(&vtype, block_ptr + pos, sizeof(uint8_t));
             const auto type = static_cast<ValueType>(vtype);
-            if (type == ValueType::kDeletion) {continue;}
             pos += sizeof(uint8_t);
 
             if (pos + sizeof(uint32_t) > block_size) break;
@@ -256,7 +258,9 @@ void SSTableReader::ForEach(const std::function<void(const std::string&, const s
             std::string value(block_ptr + pos, val_len);
             pos += val_len;
 
-            cb(key, value);
+            if (type == ValueType::kValue) {
+                cb(key, value);
+            }
         }
     }
 }
