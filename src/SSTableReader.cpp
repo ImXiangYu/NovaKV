@@ -227,7 +227,7 @@ bool SSTableReader::ReadFilterBlock() {
 
     return true;
 }
-void SSTableReader::ForEach(const std::function<void(const std::string&, const std::string&)>& cb) const {
+void SSTableReader::ForEach(const std::function<void(const std::string&, const std::string&, ValueType)>& cb) const {
     for (const auto& entry : index_entries_) {
         uint64_t pos = 0;
         const uint64_t block_size = entry.handle.size;
@@ -259,7 +259,7 @@ void SSTableReader::ForEach(const std::function<void(const std::string&, const s
             pos += val_len;
 
             if (type == ValueType::kValue) {
-                cb(key, value);
+                cb(key, value, type);
             }
         }
     }

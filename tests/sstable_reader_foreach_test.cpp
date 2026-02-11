@@ -51,8 +51,10 @@ TEST_F(SSTableReaderForEachTest, ForEachReturnsAllKeyValues) {
     ASSERT_NE(reader, nullptr);
 
     std::map<std::string, std::string> actual;
-    reader->ForEach([&actual](const std::string& key, const std::string& value) {
-        actual[key] = value;
+    reader->ForEach([&actual](const std::string& key, const std::string& value, ValueType type) {
+        if (type == ValueType::kValue) {
+            actual[key] = value;
+        }
     });
 
     EXPECT_EQ(actual.size(), expected.size());

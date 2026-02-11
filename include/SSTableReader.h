@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Storage.h"
+#include "WalHandler.h"
 
 class SSTableReader {
     public:
@@ -22,7 +23,7 @@ class SSTableReader {
         bool Get(const std::string& key, std::string* value);
 
         // 遍历/导出
-        void ForEach(const std::function<void(const std::string &, const std::string &)> &cb) const;
+        void ForEach(const std::function<void(const std::string &, const std::string &, ValueType)> &cb) const;
     private:
         // 私有构造函数，防止外部直接 new
         SSTableReader();

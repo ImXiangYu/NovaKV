@@ -10,11 +10,17 @@
 #include <map>
 #include <algorithm>
 #include <cctype>
+#include <utility>
 
 namespace fs = std::filesystem;
 
+struct ValueRecord {
+    ValueType type;
+    std::string value;
+};
+
 DBImpl::DBImpl(std::string db_path)
-    : db_path_(db_path), next_file_number_(0), imm_(nullptr) {
+    : db_path_(std::move(db_path)), next_file_number_(0), imm_(nullptr) {
 
     // 1. 确保工作目录存在
     if (!fs::exists(db_path_)) {
@@ -62,11 +68,9 @@ DBImpl::~DBImpl() {
 
     // 如果imm_非空，也清理掉
     delete imm_;
-    imm_ = nullptr;
 
     // 清理mem_
     delete mem_;
-    mem_ = nullptr;
 }
 
 void DBImpl::Put(const std::string &key, const std::string &value) {
@@ -192,11 +196,11 @@ void DBImpl::LoadSSTables() {
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
     if (levels_[0].empty()) return;
-    std::map<std::string, std::string> mp;
+    std::map<std::string, ValueRecord> mp;
     // 倒序遍历levels_[0]
     for (auto it = levels_[0].rbegin(); it != levels_[0].rend(); ++it) {
-        (*it)->ForEach([&](const std::string &key, const std::string &value) {
-            if (!mp.count(key)) {mp[key] = value;}
+        (*it)->ForEach([&](const std::string &key, const std::string &value, const ValueType type) {
+            mp.try_emplace(key, ValueRecord{type, value});
         });
     }
 
@@ -215,7 +219,12 @@ void DBImpl::CompactL0ToL1() {
     SSTableBuilder builder(&file);
 
     for (const auto& pair : mp) {
-        builder.Add(pair.first, pair.second, ValueType::kValue);
+        if (pair.second.type == ValueType::kValue) {
+            builder.Add(pair.first, pair.second.value, ValueType::kValue);
+        } else {
+            // 如果是kDeletion，就写tombstone
+            builder.Add(pair.first, "", ValueType::kDeletion);
+        }
     }
     builder.Finish();
     file.Flush();
