@@ -106,3 +106,25 @@ BenchPut       181807 ns        17705 ns        31092 items_per_second=56.4799k/
 BenchGet         1539 ns         1385 ns       525157 items_per_second=722.044k/s
 ```
 
+新增 MANIFEST 持久化/恢复 next_file_number_（每次分配文件号后刷盘）；
+重点观察写入路径 QPS 与 compaction 触发频率下的吞吐变化。
+
+```
+2026-02-12T15:11:45+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 0.30, 0.25, 0.20
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       202727 ns        18085 ns        34919 items_per_second=55.2942k/s
+BenchGet         1497 ns         1350 ns       503556 items_per_second=740.821k/s
+```
+
