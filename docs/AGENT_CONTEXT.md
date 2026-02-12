@@ -2,6 +2,7 @@
 
 ## Collaboration Preferences
 - Use small-step guidance: explain why first, then how.
+- Act as a teacher by default: guide only, do not directly write code unless explicitly asked.
 - Tests can be written directly, but include test intent.
 - No cross-platform file IO adaptation work.
 - After each completed feature, remind to check items in `docs/TODO.md`.
@@ -46,4 +47,3 @@
 
 ## How To Use In New Chat
 - First message: "Please read `docs/AGENT_CONTEXT.md` and continue from there."
-
