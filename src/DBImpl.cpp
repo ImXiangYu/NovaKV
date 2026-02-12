@@ -318,7 +318,21 @@ void DBImpl::PersistNextFileNumber() const {
     fs::rename(tmp_path, final_path);
 }
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
-    return std::make_unique<DBIterator>();
+    std::vector<std::pair<std::string, std::string>> rows;
+    // 同 key 只保留最新版本
+    // 最新是 kDeletion 就不放入 rows_
+    // 最后按 key 升序生成 rows_
+    auto it = mem_->GetIterator();
+    while (it.Valid()) {
+        // 这里的it.value()实际上是ValueRecord
+        if (it.value().type == ValueType::kValue) {
+            rows.emplace_back(it.key(), it.value().value);
+        } else {
+            // 标记删除，不放入 rows_
+        }
+        it.Next();
+    }
+    return std::make_unique<DBIterator>(std::move(rows));
 }
 
 bool DBImpl::Get(const std::string& key, ValueRecord& value) const {

@@ -115,19 +115,6 @@ class MemTable {
         // 1. 获取 WalHandler 指针，方便 DBImpl 调用 LoadLog
         WalHandler* GetWalHandler() { return &wal_; }
 
-        // 2. 纯内存插入：用于从 WAL 恢复数据或 Minor Compaction
-        // 绕过了 wal_.AddLog(key, value, OpType::ADD);
-        void PutWithoutWal(const K& key, const V& value) {
-            std::unique_lock<std::shared_mutex> lock(rw_lock_);
-            table_.insert_element(key, value);
-        }
-
-        // 3. 纯内存删除
-        void RemoveWithoutWal(const K& key) {
-            std::unique_lock<std::shared_mutex> lock(rw_lock_);
-            table_.delete_element(key);
-        }
-
         void ApplyWithoutWal(const K& key, const V& value) {
             std::unique_lock<std::shared_mutex> lock(rw_lock_);
             table_.insert_element(key, value);

@@ -9,6 +9,7 @@
 
 class DBIterator {
     public:
+        explicit DBIterator(std::vector<std::pair<std::string, std::string>>&& rows);
         void Seek(const std::string& start_key);
         void Next();
         bool Valid() const;

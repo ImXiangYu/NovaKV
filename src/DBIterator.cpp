@@ -30,3 +30,5 @@ const std::string & DBIterator::value() const {
     assert(Valid());
     return rows_[pos_].second;
 }
+
+DBIterator::DBIterator(std::vector<std::pair<std::string, std::string>> &&rows) : rows_(std::move(rows)), pos_(0) {}
