@@ -22,6 +22,9 @@ class DBImpl {
         void CompactL0ToL1();
         size_t LevelSize(size_t level) const;
 
+        bool LoadNextFileNumberFromManifest();
+        void PersistNextFileNumber() const;
+
     private:
         void MinorCompaction();
         void RecoverFromWals(); // 关键：启动时自动恢复逻辑

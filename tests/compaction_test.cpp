@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <string>
+#include <algorithm>
 
 #include "DBImpl.h"
 
@@ -27,6 +28,25 @@ bool GetValue(DBImpl& db, const std::string& key, std::string& value) {
     }
     value = record.value;
     return true;
+}
+
+int MaxDataFileNumber(const std::string& dir) {
+    int max_id = -1;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        const auto ext = entry.path().extension().string();
+        if (ext != ".wal" && ext != ".sst") {
+            continue;
+        }
+        const std::string stem = entry.path().stem().string();
+        if (stem.empty() || !std::all_of(stem.begin(), stem.end(), [](unsigned char c) { return std::isdigit(c); })) {
+            continue;
+        }
+        max_id = std::max(max_id, std::stoi(stem));
+    }
+    return max_id;
 }
 } // namespace
 
@@ -121,4 +141,26 @@ TEST_F(CompactionTest, DestructorCleansUpReaders) {
     }
 
     SUCCEED();
+}
+
+TEST_F(CompactionTest, NextFileNumberMonotonicAcrossRestart) {
+    {
+        DBImpl db(test_db_path);
+        for (int i = 0; i < 1200; ++i) {
+            PutValue(db, "first_" + std::to_string(i), "v");
+        }
+    }
+
+    const int max_id_before_restart = MaxDataFileNumber(test_db_path);
+    ASSERT_GE(max_id_before_restart, 0);
+
+    {
+        DBImpl db(test_db_path);
+        for (int i = 0; i < 1200; ++i) {
+            PutValue(db, "second_" + std::to_string(i), "v");
+        }
+    }
+
+    const int max_id_after_restart = MaxDataFileNumber(test_db_path);
+    EXPECT_GT(max_id_after_restart, max_id_before_restart);
 }
