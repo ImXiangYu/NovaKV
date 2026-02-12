@@ -74,7 +74,7 @@ TEST_F(MemTableBaseTest, ConcurrentReadWrite) {
 
 // --- 第二部分：恢复功能测试 (使用 persistence_log) ---
 
-TEST_F(MemTableBaseTest, BasicRecovery) {
+TEST_F(MemTableBaseTest, NoAutoRecoveryOnReopen) {
     {
         MemTable<int, std::string> mt(persistence_log);
         mt.Put(1, "apple");
@@ -84,13 +84,13 @@ TEST_F(MemTableBaseTest, BasicRecovery) {
 
     MemTable<int, std::string> mt_new(persistence_log);
     std::string val;
-    EXPECT_EQ(mt_new.Count(), 1);
-    EXPECT_TRUE(mt_new.Get(2, val));
-    EXPECT_EQ(val, "banana");
+    // 恢复职责已经上移到 DBImpl，MemTable 构造不再自动回放 WAL。
+    EXPECT_EQ(mt_new.Count(), 0);
     EXPECT_FALSE(mt_new.Get(1, val));
+    EXPECT_FALSE(mt_new.Get(2, val));
 }
 
-TEST_F(MemTableBaseTest, LargeScaleRecovery) {
+TEST_F(MemTableBaseTest, ManualReplayCanRecoverData) {
     const int count = 1000;
     {
         MemTable<int, int> mt(persistence_log);
@@ -100,6 +100,19 @@ TEST_F(MemTableBaseTest, LargeScaleRecovery) {
     } // 模拟崩溃
 
     MemTable<int, int> mt_recovery(persistence_log);
+    EXPECT_EQ(mt_recovery.Count(), 0);
+
+    WalHandler wal(persistence_log);
+    wal.LoadLog([&mt_recovery](ValueType type, const std::string& k, const std::string& v) {
+        if (type == ValueType::kValue) {
+            int key;
+            int value;
+            std::memcpy(&key, k.data(), sizeof(int));
+            std::memcpy(&value, v.data(), sizeof(int));
+            mt_recovery.ApplyWithoutWal(key, value);
+        }
+    });
+
     EXPECT_EQ(mt_recovery.Count(), count);
     int val;
     EXPECT_TRUE(mt_recovery.Get(500, val));

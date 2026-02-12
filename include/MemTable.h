@@ -70,10 +70,7 @@ class MemTable {
     public:
         // MemTable(int max_level = 16, const std::string& wal_file) : table_(max_level), wal_(wal_file) {}
         // 当构造函数中既有带默认值的参数，又有必须传递的参数时，C++ 规定：默认实参必须从右向左排列。
-        MemTable(const std::string& wal_file, int max_level = 16) : wal_(wal_file), table_(max_level) {
-            // 启动时自动恢复
-            RecoverFromWal();
-        }
+        MemTable(const std::string& wal_file, int max_level = 16) : wal_(wal_file), table_(max_level) {}
 
 
         // 插入或更新
@@ -129,6 +126,11 @@ class MemTable {
         void RemoveWithoutWal(const K& key) {
             std::unique_lock<std::shared_mutex> lock(rw_lock_);
             table_.delete_element(key);
+        }
+
+        void ApplyWithoutWal(const K& key, const V& value) {
+            std::unique_lock<std::shared_mutex> lock(rw_lock_);
+            table_.insert_element(key, value);
         }
 
         // 4. 获取内存占用估算 (字节)

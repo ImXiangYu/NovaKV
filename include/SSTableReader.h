@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "Storage.h"
-#include "WalHandler.h"
+#include "ValueRecord.h"
 
 class SSTableReader {
     public:

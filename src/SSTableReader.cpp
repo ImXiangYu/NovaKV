@@ -12,7 +12,6 @@
 
 #include "BloomFilter.h"
 #include "Logger.h"
-#include "WalHandler.h"
 
 SSTableReader::SSTableReader(): fd_(-1), data_(MAP_FAILED), file_size_(0) {}
 

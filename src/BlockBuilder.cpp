@@ -4,8 +4,6 @@
 
 #include "BlockBuilder.h"
 
-#include "WalHandler.h"
-
 void BlockBuilder::Add(const std::string& key, const std::string& value, ValueType type) {
     // 布局：[KeyLen (4B)] [Key 内容] [ValueType(1B)] [ValueLen (4B)] [Value 内容]
     // 1. 获取长度

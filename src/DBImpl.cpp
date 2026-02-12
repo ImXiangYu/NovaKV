@@ -14,11 +14,6 @@
 
 namespace fs = std::filesystem;
 
-struct ValueRecord {
-    ValueType type;
-    std::string value;
-};
-
 DBImpl::DBImpl(std::string db_path)
     : db_path_(std::move(db_path)), next_file_number_(0), imm_(nullptr) {
 
@@ -32,25 +27,21 @@ DBImpl::DBImpl(std::string db_path)
     // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
     levels_.resize(2);
 
+    // 确定next_file_number_
+    InitNextFileNumberFromDisk();
+
     // 调用LoadSSTables()恢复数据
     LoadSSTables();
 
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
-    std::string wal_path = db_path_ + "/0.wal";
-    mem_ = new MemTable<std::string, std::string>(wal_path);
+    const std::string wal_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".wal";
+    mem_ = new MemTable<std::string, ValueRecord>(wal_path);
 
-    // 4. 执行启动恢复 (Recover)
-    // 逻辑：如果目录下有旧的 WAL，说明之前有数据没落盘，通过“后门”接口塞进内存
-    LOG_INFO("Checking for recovery...");
-    mem_->GetWalHandler()->LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
-        if (type == ValueType::kValue) {
-            mem_->PutWithoutWal(k, v); // 关键：恢复时不写日志
-        } else if (type == ValueType::kDeletion) {
-            mem_->RemoveWithoutWal(k);
-        }
-    });
-    LOG_INFO(std::string("Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
+    // 恢复WAL
+    RecoverFromWals();
+
+    LOG_INFO(std::string("SSTs & WALs Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
 }
 
 DBImpl::~DBImpl() {
@@ -73,21 +64,6 @@ DBImpl::~DBImpl() {
     delete mem_;
 }
 
-void DBImpl::Put(const std::string &key, const std::string &value) {
-    // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
-    if (mem_->Count() >= 1000) {
-        if (imm_ != nullptr) {
-            // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
-            // 后期我们会用后台线程来优化这里
-            LOG_WARN("Wait: MinorCompaction is too slow...");
-        }
-        MinorCompaction();
-    }
-
-    // 2. 正常写入
-    mem_->Put(key, value);
-}
-
 void DBImpl::MinorCompaction() {
     LOG_INFO("Minor Compaction triggered...");
     std::string old_wal_path = mem_->GetWalPath();
@@ -97,11 +73,11 @@ void DBImpl::MinorCompaction() {
     LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm_->Count()));
 
     // 2. 开启全新的 mem_ 和新的 WAL 文件
-    std::string new_wal = db_path_ + "/" + std::to_string(++next_file_number_) + ".wal";
-    mem_ = new MemTable<std::string, std::string>(new_wal);
+    std::string new_wal = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".wal";
+    mem_ = new MemTable<std::string, ValueRecord>(new_wal);
 
     // 3. 将 imm_ 落盘为 SSTable
-    std::string sst_path = db_path_ + "/" + std::to_string(next_file_number_) + ".sst";
+    std::string sst_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".sst";
 
     // 封装落盘逻辑
     {
@@ -110,7 +86,7 @@ void DBImpl::MinorCompaction() {
 
         auto it = imm_->GetIterator();
         while (it.Valid()) {
-            builder.Add(it.key(), it.value(), ValueType::kValue);
+            builder.Add(it.key(), it.value().value, ValueType::kValue);
             it.Next();
         }
         builder.Finish();
@@ -146,25 +122,41 @@ void DBImpl::MinorCompaction() {
     imm_ = nullptr;
 }
 
-void DBImpl::Recover() {
-    // 1. 实际开发中这里会扫描目录下的 .wal 文件
-    // 我们先实现最核心的：重放 active.wal
-    std::string wal_path = db_path_ + "/active.wal";
-
-    // 这里利用你写好的 LoadLog 回调逻辑
-    // WalHandler 会自动校验 CRC，数据不全或损坏会自动 break
-    mem_->GetWalHandler()->LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
-        if (type == ValueType::kValue) {
-            mem_->PutWithoutWal(k, v); // 恢复时只需写内存，不再写 WAL
-        } else {
-            mem_->RemoveWithoutWal(k);
+void DBImpl::RecoverFromWals() {
+    LOG_INFO(std::string("Recover from wals start."));
+    // 扫描目录找出所有 .wal（数字文件名）。
+    std::vector<int> wals;
+    for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
+        // 如果每一条的扩展名是.wal，就记录下来
+        if (entry.is_regular_file()) {
+            if (entry.path().extension() == ".wal") {
+                std::string stem = entry.path().stem().string();
+                // 如果不是全数字就跳过
+                if (!std::all_of(stem.begin(), stem.end(),
+                                 [](const unsigned char c) { return std::isdigit(c); })) {
+                    continue;
+                                 }
+                int id = std::stoi(stem);
+                wals.push_back(id);
+            }
         }
-    });
+    }
+    // 按文件号升序排列
+    std::sort(wals.begin(), wals.end());
+
+    // 对每个WAL，临时创建一个WalHandler并LoadLog
+    for (int id : wals) {
+        std::string wal_path = db_path_ + "/" + std::to_string(id) + ".wal";
+        WalHandler handler(wal_path);
+        handler.LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
+            mem_->ApplyWithoutWal(k, {type, v});
+        });
+    }
+    LOG_INFO(std::string("Recover from wals completed."));
 }
 void DBImpl::LoadSSTables() {
     LOG_INFO(std::string("LoadSSTables start"));
     std::vector<std::pair<int, std::string>> sstables;
-    int max_id = 0;
     for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
         // 如果每一条的扩展名是.sst，就记录下来
         if (entry.is_regular_file()) {
@@ -177,13 +169,11 @@ void DBImpl::LoadSSTables() {
                 }
                 int id = std::stoi(stem);
                 sstables.emplace_back(id, entry.path().string());
-                max_id = std::max(max_id, id);
             }
         }
     }
     // 之后把sstables从小到大排序，排序后重新Open加到levels_[0]即可
     std::sort(sstables.begin(), sstables.end());
-    next_file_number_ = std::max(next_file_number_, max_id);
     for (const auto & sstable : sstables) {
         if (SSTableReader* reader = SSTableReader::Open(sstable.second)) {
             LOG_INFO(std::string("SSTable recovery: ") + sstable.second);
@@ -192,6 +182,32 @@ void DBImpl::LoadSSTables() {
         }
     }
     LOG_INFO(std::string("LoadSSTables completed"));
+}
+
+int DBImpl::AllocateFileNumber() {
+    // 分配文件编号，避免到处++next_file_number_ 导致漏改。
+    return ++next_file_number_;
+}
+
+void DBImpl::InitNextFileNumberFromDisk() {
+    // 负责计算并设置next_file_number_
+    int max_id = 0;
+    for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
+        // 如果每一条的扩展名是.sst 或 .wal ，就记录下来
+        if (entry.is_regular_file()) {
+            if (entry.path().extension() == ".sst" || entry.path().extension() == ".wal") {
+                std::string stem = entry.path().stem().string();
+                // 如果不是全数字就跳过
+                if (!std::all_of(stem.begin(), stem.end(),
+                                 [](const unsigned char c) { return std::isdigit(c); })) {
+                    continue;
+                                 }
+                int id = std::stoi(stem);
+                max_id = std::max(max_id, id);
+            }
+        }
+    }
+    next_file_number_ = max_id;
 }
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
@@ -213,7 +229,7 @@ void DBImpl::CompactL0ToL1() {
         return;
     }
 
-    std::string new_sst_path = db_path_ + "/" + std::to_string(++next_file_number_) + ".sst";
+    std::string new_sst_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".sst";
 
     WritableFile file(new_sst_path);
     SSTableBuilder builder(&file);
@@ -246,7 +262,7 @@ size_t DBImpl::LevelSize(const size_t level) const {
     return levels_[level].size();
 }
 
-bool DBImpl::Get(const std::string& key, std::string& value) {
+bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     // 第一级：查找活跃内存 (MemTable)
     if (mem_ && mem_->Get(key, value)) {
         LOG_DEBUG(std::string("Get hit: memtable key=") + key);
@@ -264,7 +280,7 @@ bool DBImpl::Get(const std::string& key, std::string& value) {
     // 越晚生成的 SST 文件，数据越新，所以要逆序遍历
     // 先倒序遍历 levels_[0]（L0 新到旧）
     for (size_t i = levels_[0].size(); i-- > 0;) {
-        if (levels_[0][i]->Get(key, &value)) {
+        if (levels_[0][i]->Get(key, &value.value)) {
             LOG_DEBUG(std::string("Get hit in L0: sstable key=") + key);
             return true;
         }
@@ -272,12 +288,28 @@ bool DBImpl::Get(const std::string& key, std::string& value) {
 
     // 再倒序遍历 levels_[1]（L1 新到旧）
     for (size_t i = levels_[1].size(); i-- > 0;) {
-        if (levels_[1][i]->Get(key, &value)) {
+        if (levels_[1][i]->Get(key, &value.value)) {
             LOG_DEBUG(std::string("Get hit in L1: sstable key=") + key);
             return true;
         }
     }
 
     return false;
+}
+
+
+void DBImpl::Put(const std::string &key, ValueRecord &value) {
+    // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
+    if (mem_->Count() >= 1000) {
+        if (imm_ != nullptr) {
+            // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
+            // 后期我们会用后台线程来优化这里
+            LOG_WARN("Wait: MinorCompaction is too slow...");
+        }
+        MinorCompaction();
+    }
+
+    // 2. 正常写入
+    mem_->Put(key, value);
 }
 

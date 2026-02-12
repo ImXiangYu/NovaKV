@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <string>
 
-#include "WalHandler.h"
+#include "ValueRecord.h"
 
 class BlockBuilder {
     public:

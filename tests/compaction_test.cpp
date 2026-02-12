@@ -11,6 +11,25 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+void PutValue(DBImpl& db, const std::string& key, const std::string& value) {
+    ValueRecord record{ValueType::kValue, value};
+    db.Put(key, record);
+}
+
+bool GetValue(DBImpl& db, const std::string& key, std::string& value) {
+    ValueRecord record{ValueType::kValue, ""};
+    if (!db.Get(key, record)) {
+        return false;
+    }
+    if (record.type == ValueType::kDeletion) {
+        return false;
+    }
+    value = record.value;
+    return true;
+}
+} // namespace
+
 class CompactionTest : public ::testing::Test {
 protected:
     std::string test_db_path = "./test_compact_db";
@@ -32,17 +51,17 @@ protected:
 TEST_F(CompactionTest, ManualL0ToL1CompactionKeepsNewestValue) {
     DBImpl db(test_db_path);
 
-    db.Put("dup", "old");
+    PutValue(db, "dup", "old");
     for (int i = 0; i < 999; ++i) {
-        db.Put("k1_" + std::to_string(i), "v");
+        PutValue(db, "k1_" + std::to_string(i), "v");
     }
-    db.Put("trigger_1", "x"); // 触发第一次 MinorCompaction
+    PutValue(db, "trigger_1", "x"); // 触发第一次 MinorCompaction
 
-    db.Put("dup", "new");
+    PutValue(db, "dup", "new");
     for (int i = 0; i < 999; ++i) {
-        db.Put("k2_" + std::to_string(i), "v");
+        PutValue(db, "k2_" + std::to_string(i), "v");
     }
-    db.Put("trigger_2", "y"); // 触发第二次 MinorCompaction
+    PutValue(db, "trigger_2", "y"); // 触发第二次 MinorCompaction
 
     db.CompactL0ToL1();
 
@@ -50,30 +69,30 @@ TEST_F(CompactionTest, ManualL0ToL1CompactionKeepsNewestValue) {
     EXPECT_EQ(db.LevelSize(1), 1u);
 
     std::string val;
-    EXPECT_TRUE(db.Get("dup", val));
+    EXPECT_TRUE(GetValue(db, "dup", val));
     EXPECT_EQ(val, "new");
 }
 
 TEST_F(CompactionTest, AutoL0ToL1CompactionTriggeredOnThreshold) {
     DBImpl db(test_db_path);
 
-    db.Put("dup", "old");
+    PutValue(db, "dup", "old");
     for (int i = 0; i < 999; ++i) {
-        db.Put("k1_" + std::to_string(i), "v");
+        PutValue(db, "k1_" + std::to_string(i), "v");
     }
-    db.Put("trigger_1", "x"); // 触发第一次 MinorCompaction
+    PutValue(db, "trigger_1", "x"); // 触发第一次 MinorCompaction
 
-    db.Put("dup", "new");
+    PutValue(db, "dup", "new");
     for (int i = 0; i < 999; ++i) {
-        db.Put("k2_" + std::to_string(i), "v");
+        PutValue(db, "k2_" + std::to_string(i), "v");
     }
-    db.Put("trigger_2", "y"); // 触发第二次 MinorCompaction
+    PutValue(db, "trigger_2", "y"); // 触发第二次 MinorCompaction
 
     EXPECT_EQ(db.LevelSize(0), 0u);
     EXPECT_EQ(db.LevelSize(1), 1u);
 
     std::string val;
-    EXPECT_TRUE(db.Get("dup", val));
+    EXPECT_TRUE(GetValue(db, "dup", val));
     EXPECT_EQ(val, "new");
 }
 
@@ -81,14 +100,14 @@ TEST_F(CompactionTest, RecoverSSTablesOnStartup) {
     {
         DBImpl db(test_db_path);
         for (int i = 0; i < 1000; ++i) {
-            db.Put("k_" + std::to_string(i), "v_" + std::to_string(i));
+            PutValue(db, "k_" + std::to_string(i), "v_" + std::to_string(i));
         }
-        db.Put("trigger", "x");
+        PutValue(db, "trigger", "x");
     }
 
     DBImpl db_recovered(test_db_path);
     std::string val;
-    EXPECT_TRUE(db_recovered.Get("k_10", val));
+    EXPECT_TRUE(GetValue(db_recovered, "k_10", val));
     EXPECT_EQ(val, "v_10");
 }
 
@@ -96,9 +115,9 @@ TEST_F(CompactionTest, DestructorCleansUpReaders) {
     {
         DBImpl db(test_db_path);
         for (int i = 0; i < 1000; ++i) {
-            db.Put("k_" + std::to_string(i), "v_" + std::to_string(i));
+            PutValue(db, "k_" + std::to_string(i), "v_" + std::to_string(i));
         }
-        db.Put("trigger", "x"); // 触发一次落盘，确保有 SSTable reader
+        PutValue(db, "trigger", "x"); // 触发一次落盘，确保有 SSTable reader
     }
 
     SUCCEED();

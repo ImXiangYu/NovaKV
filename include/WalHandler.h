@@ -9,12 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <string>
-
-enum class ValueType : uint8_t {
-    // kValue为正常Value, kDeletion为已删除值
-    kValue = 1,
-    kDeletion = 2
-};
+#include "ValueRecord.h"
 
 class WalHandler {
     private:

@@ -8,7 +8,7 @@
 #include "BlockBuilder.h"
 #include "FileFormats.h"
 #include "Storage.h"
-#include "WalHandler.h"
+#include "ValueRecord.h"
 #include <vector>
 #include <string>
 

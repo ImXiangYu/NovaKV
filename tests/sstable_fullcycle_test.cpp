@@ -8,11 +8,6 @@
 #include <filesystem>
 #include <map>
 
-struct ValueRecord {
-    ValueType type;
-    std::string value;
-};
-
 class SSTableFullCycleTest : public ::testing::Test {
 protected:
     const std::string test_file = "full_test.sst";
@@ -99,15 +94,15 @@ TEST_F(SSTableFullCycleTest, TombstoneEntryIsHidden) {
     EXPECT_TRUE(reader->Get("c", &val));
     EXPECT_EQ(val, "vc");
 
-    std::map<std::string, ValueRecord> actual;
+    std::map<std::string, std::string> actual;
     reader->ForEach([&actual](const std::string& key, const std::string& value, ValueType type) {
         if (type == ValueType::kValue) {
-            actual[key].value = value;
+            actual[key] = value;
         }
     });
     EXPECT_EQ(actual.size(), 2u);
-    EXPECT_EQ(actual["a"].value, "va");
-    EXPECT_EQ(actual["c"].value, "vc");
+    EXPECT_EQ(actual["a"], "va");
+    EXPECT_EQ(actual["c"], "vc");
     EXPECT_EQ(actual.count("b"), 0u);
 
     delete reader;
