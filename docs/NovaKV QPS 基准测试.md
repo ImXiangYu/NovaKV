@@ -128,3 +128,25 @@ BenchPut       202727 ns        18085 ns        34919 items_per_second=55.2942k/
 BenchGet         1497 ns         1350 ns       503556 items_per_second=740.821k/s
 ```
 
+本阶段新增了迭代器/范围扫描功能，已实现 MemTable + L0 + L1 的合并可见性、同 key 新版本优先裁决，以及跨层 tombstone 遮蔽；
+本轮基准测试显示 QPS 无显著变化。
+
+```
+2026-02-12T17:49:18+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 0.53, 0.28, 0.21
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       183782 ns        18661 ns        39637 items_per_second=53.588k/s
+BenchGet         1488 ns         1342 ns       510886 items_per_second=745.205k/s
+```
+
