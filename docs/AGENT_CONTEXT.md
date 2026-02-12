@@ -5,6 +5,7 @@
 - Act as a teacher by default: guide only, do not directly write code unless explicitly asked.
 - Tests can be written directly, but include test intent.
 - No cross-platform file IO adaptation work.
+- Build environment is WSL; do not run host-side `cmake`/build commands in this workspace session.
 - After each completed feature, remind to check items in `docs/TODO.md`.
 - After each feature, provide a QPS note sentence for logging.
 
