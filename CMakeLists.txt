@@ -12,6 +12,8 @@ set(NOVAKV_SOURCES
     src/SSTableReader.cpp
     src/WalHandler.cpp
     src/Logger.cpp
+        src/DBIterator.cpp
+        include/DBIterator.h
 )
 
 add_library(novakv_core ${NOVAKV_SOURCES})

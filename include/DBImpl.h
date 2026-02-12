@@ -10,6 +10,8 @@
 
 #include <vector>
 #include <mutex>
+
+#include "DBIterator.h"
 #include "SSTableReader.h"
 
 class DBImpl {
@@ -22,8 +24,12 @@ class DBImpl {
         void CompactL0ToL1();
         size_t LevelSize(size_t level) const;
 
+        // 记录与恢复next_file_number_
         bool LoadNextFileNumberFromManifest();
         void PersistNextFileNumber() const;
+
+        // 迭代器
+        std::unique_ptr<DBIterator> NewIterator();
 
     private:
         void MinorCompaction();

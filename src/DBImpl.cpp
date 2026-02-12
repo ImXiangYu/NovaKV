@@ -317,6 +317,9 @@ void DBImpl::PersistNextFileNumber() const {
     // 原子替换：将 tmp 重命名为正式文件
     fs::rename(tmp_path, final_path);
 }
+std::unique_ptr<DBIterator> DBImpl::NewIterator() {
+    return std::make_unique<DBIterator>();
+}
 
 bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     // 第一级：查找活跃内存 (MemTable)

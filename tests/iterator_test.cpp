@@ -2,7 +2,6 @@
 
 #include <filesystem>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -30,77 +29,20 @@ void ForceMinorCompaction(DBImpl& db, const std::string& prefix) {
     PutValue(db, prefix + "_trigger", "x");
 }
 
-template <typename T, typename = void>
-struct HasNewIterator : std::false_type {};
-
-template <typename T>
-struct HasNewIterator<T, std::void_t<decltype(std::declval<T&>().NewIterator())>> : std::true_type {};
-
-template <typename T, typename = void>
-struct HasSeek : std::false_type {};
-
-template <typename T>
-struct HasSeek<T, std::void_t<decltype(std::declval<T&>().Seek(std::declval<const std::string&>()))>> : std::true_type {};
-
-template <typename T, typename = void>
-struct HasNext : std::false_type {};
-
-template <typename T>
-struct HasNext<T, std::void_t<decltype(std::declval<T&>().Next())>> : std::true_type {};
-
-template <typename T, typename = void>
-struct HasValid : std::false_type {};
-
-template <typename T>
-struct HasValid<T, std::void_t<decltype(std::declval<T&>().Valid())>> : std::true_type {};
-
-template <typename T, typename = void>
-struct HasKey : std::false_type {};
-
-template <typename T>
-struct HasKey<T, std::void_t<decltype(std::declval<T&>().key())>> : std::true_type {};
-
-template <typename T, typename = void>
-struct HasValue : std::false_type {};
-
-template <typename T>
-struct HasValue<T, std::void_t<decltype(std::declval<T&>().value())>> : std::true_type {};
-
-template <typename DB, typename = void>
-struct HasExpectedIteratorApi : std::false_type {};
-
-template <typename DB>
-struct HasExpectedIteratorApi<DB, std::enable_if_t<HasNewIterator<DB>::value>> {
-private:
-    using IteratorPtr = decltype(std::declval<DB&>().NewIterator());
-    using Iterator = std::remove_reference_t<decltype(*std::declval<IteratorPtr&>())>;
-
-public:
-    static constexpr bool value =
-        HasSeek<Iterator>::value &&
-        HasNext<Iterator>::value &&
-        HasValid<Iterator>::value &&
-        HasKey<Iterator>::value &&
-        HasValue<Iterator>::value;
-};
-
-template <typename DB>
-std::vector<std::pair<std::string, std::string>> CollectFrom(DB& db, const std::string& start_key) {
-    if constexpr (!HasExpectedIteratorApi<DB>::value) {
-        GTEST_SKIP() << "Iterator API not ready. Expect DBImpl::NewIterator + Seek/Next/Valid/key/value.";
-        return {};
-    } else {
-        std::vector<std::pair<std::string, std::string>> out;
-        auto it = db.NewIterator();
-        ASSERT_TRUE(static_cast<bool>(it));
-
-        it->Seek(start_key);
-        while (it->Valid()) {
-            out.emplace_back(it->key(), it->value());
-            it->Next();
-        }
+std::vector<std::pair<std::string, std::string>> CollectFrom(DBImpl& db, const std::string& start_key) {
+    std::vector<std::pair<std::string, std::string>> out;
+    auto it = db.NewIterator();
+    if (!it) {
+        ADD_FAILURE() << "NewIterator() returned nullptr";
         return out;
     }
+
+    it->Seek(start_key);
+    while (it->Valid()) {
+        out.emplace_back(it->key(), it->value());
+        it->Next();
+    }
+    return out;
 }
 
 }  // namespace
@@ -143,6 +85,17 @@ TEST_F(IteratorTest, Seek_UsesLowerBoundSemantics) {
     const auto rows = CollectFrom(db, "b");
     ASSERT_EQ(rows.size(), 1u);
     EXPECT_EQ(rows[0], std::make_pair(std::string("c"), std::string("3")));
+}
+
+TEST_F(IteratorTest, Seek_PastEndIsInvalid) {
+    DBImpl db(test_db_path);
+    PutValue(db, "a", "1");
+    PutValue(db, "b", "2");
+
+    auto it = db.NewIterator();
+    ASSERT_TRUE(static_cast<bool>(it));
+    it->Seek("z");
+    EXPECT_FALSE(it->Valid());
 }
 
 TEST_F(IteratorTest, Iterator_HidesTombstoneInMemTable) {
