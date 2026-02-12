@@ -7,7 +7,7 @@
 - No cross-platform file IO adaptation work.
 - Build environment is WSL; do not run host-side `cmake`/build commands in this workspace session.
 - After each completed feature, remind to check items in `docs/TODO.md`.
-- Measure QPS once after each stage-level feature; if there is no obvious change, skip repeated measurement and log "no significant QPS change".
+- If QPS is explicitly requested or needed, provide a QPS note and clearly mark the newly added feature(s), even when QPS shows no significant change.
 
 ## Project Goal
 - Build a LevelDB-like KV database for interview-level completeness.

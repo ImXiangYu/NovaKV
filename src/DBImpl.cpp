@@ -91,7 +91,7 @@ void DBImpl::MinorCompaction() {
 
         auto it = imm_->GetIterator();
         while (it.Valid()) {
-            builder.Add(it.key(), it.value().value, ValueType::kValue);
+            builder.Add(it.key(), it.value().value, it.value().type);
             it.Next();
         }
         builder.Finish();
@@ -319,19 +319,37 @@ void DBImpl::PersistNextFileNumber() const {
 }
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
     std::vector<std::pair<std::string, std::string>> rows;
-    // 同 key 只保留最新版本
+    std::map<std::string, ValueRecord> seen;
+    // 同 key 只保留最新版本，先从mem开始
     // 最新是 kDeletion 就不放入 rows_
     // 最后按 key 升序生成 rows_
     auto it = mem_->GetIterator();
     while (it.Valid()) {
         // 这里的it.value()实际上是ValueRecord
-        if (it.value().type == ValueType::kValue) {
-            rows.emplace_back(it.key(), it.value().value);
-        } else {
-            // 标记删除，不放入 rows_
-        }
+        seen.try_emplace(it.key(), it.value());
         it.Next();
     }
+
+    // 之后是L0，从新到旧，要逆序遍历
+    for (auto l = levels_[0].rbegin(); l != levels_[0].rend(); ++l) {
+        (*l)->ForEach([&](const std::string &key, const std::string &value, const ValueType type) {
+            seen.try_emplace(key, ValueRecord{type, value});
+        });
+    }
+
+    // L1 同上
+    for (auto l = levels_[1].rbegin(); l != levels_[1].rend(); ++l) {
+        (*l)->ForEach([&](const std::string &key, const std::string &value, const ValueType type) {
+            seen.try_emplace(key, ValueRecord{type, value});
+        });
+    }
+
+    for (const auto &[fst, snd] : seen) {
+        if (snd.type == ValueType::kValue) {
+            rows.emplace_back(fst, snd.value);
+        }
+    }
+
     return std::make_unique<DBIterator>(std::move(rows));
 }
 

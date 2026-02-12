@@ -257,9 +257,7 @@ void SSTableReader::ForEach(const std::function<void(const std::string&, const s
             std::string value(block_ptr + pos, val_len);
             pos += val_len;
 
-            if (type == ValueType::kValue) {
-                cb(key, value, type);
-            }
+            cb(key, value, type);
         }
     }
 }
