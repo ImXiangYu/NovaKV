@@ -1,60 +1,81 @@
 # NovaKV
-基于 LSM-Tree 的 KV 存储系统学习实践，聚焦核心数据结构与落盘流程的可读实现。（自我学习项目，非生产级）
+基于 LSM-Tree 的 KV 存储系统学习实践。  
+项目定位：面向 C++ 后端求职的工程化项目（非生产级），强调“可实现、可验证、可讲解”。
 
 ## 项目目标
-- 理解 LSM-Tree 核心组件的职责与协作方式
-- 用 C++17 从零实现可运行的最小 KV 存储链路
-- 通过单元测试和阶段性文档沉淀学习过程
+- 通过从零实现核心存储链路，理解 LSM-Tree 关键机制。
+- 形成可面试讲解的双主线能力：
+  - 存储主线：WAL / MemTable / SSTable / Compaction / Recovery
+  - 网络主线：Client-Server 协议 / 并发模型 / 服务稳定性（规划中）
 
-## 当前实现
-- MemTable: 基于跳表的内存写入层
-- WAL: 写前日志，保证崩溃恢复的可重放性
-- SSTable: Builder/Reader/BlockBuilder 的落盘与读取
-- BloomFilter: 查询加速的布隆过滤器
-- DBImpl: 对外入口与核心流程串联
+## 当前状态（现状）
+### 已实现
+- MemTable（跳表）+ WAL 写前日志。
+- WAL CRC32 校验与启动回放。
+- SSTable Builder/Reader（Data Block / Index / Footer / Bloom Filter）。
+- DBImpl 统一读写路径，支持 L0/L1。
+- Minor Compaction（MemTable -> SST）与基础 L0->L1 合并。
+- 启动恢复：加载 `.sst`、回放 `.wal`。
+- `MANIFEST` 持久化并恢复 `next_file_number_`。
+- 迭代器扫描：合并 MemTable + L0 + L1，遵循“新版本优先”，并隐藏 tombstone。
 
-## 快速开始
+### 进行中
+- 删除语义完整链路（跨层 tombstone 保留/清理策略）。
+- 完整版本元数据（Manifest 记录存活文件与层级关系）。
+- 后台任务（imm flush / major compaction）与并发策略收敛。
+
+### 规划中
+- 网络服务化（`epoll + 线程池`）与 client-server 协议。
+
+详细顺序请见：`docs/TODO.md`（顺序执行版）。
+
+## 构建与运行
+本项目使用 CMake + C++17。测试与基准依赖 GoogleTest/Google Benchmark（通过 FetchContent 拉取，需要网络）。
 
 ### 构建
-本项目使用 CMake + C++17，并通过 FetchContent 拉取 GoogleTest（需要网络）。
-
 ```bash
 cmake -S . -B build
 cmake --build build
 ```
 
-### 运行示例
-
+### 运行全部测试
 ```bash
-./build/nova_test
+ctest --test-dir build --output-on-failure
 ```
 
-### 运行测试
-
+### 运行单个测试（示例）
 ```bash
-cd build
-ctest
+./build/dbimpl_test
+./build/iterator_test
 ```
 
-也可以直接运行单个测试可执行文件，例如 `block_test`、`dbimpl_test`。
+### 运行基准测试
+```bash
+./build/nova_bench
+```
+
+说明：
+- `nova_test` 目前是 `main.cpp` 的手动示例程序（非完整 DB 客户端）。
+- `SSTableReader` 使用 `mmap` 等 POSIX 接口，建议在 Linux/WSL 环境下开发和运行。
 
 ## 目录结构
-
+```text
+include/     头文件（MemTable/SkipList/WAL/SSTable/DBImpl 等）
+src/         核心实现
+tests/       单元测试（每个 *.cpp 会生成独立测试目标）
+benchmark/   基准测试
+docs/        学习笔记、阶段总结、路线文档
 ```
-include/    头文件（MemTable/SkipList/SSTable/WAL 等）
-src/        核心实现
-tests/      单元测试
-docs/       学习笔记与阶段总结
-```
 
-## 学习笔记
-项目过程中记录了关键模块的实现思路与验证过程，详见 `docs/`：
-- `docs/SSTable 与 LSM-Tree 存储层.md`
-- `docs/WriteAheadLog.md`
-- `docs/SkipList跳表.md`
-- `docs/测试结果.md`
+## 文档与路线
+- 路线与优先级：`docs/TODO.md`
+- 协作上下文：`docs/AGENT_CONTEXT.md`
+- 学习笔记：`docs/` 目录下各专题文档
 
-## 路线与边界
-- 这是个人学习项目，重点在结构清晰与可验证
-- 不追求完整的线上特性（如压缩、分层压实、并发控制）
-- 欢迎基于学习目的交流或提 Issue 指正
+## 文档策略
+- 只在关键节点输出文档：设计分叉点、关键问题复盘、阶段完成总结。
+- 文档目标是复盘与面试表达，不追求记录每个实现细节。
+
+## 边界说明
+- 这是个人学习项目，优先保证结构清晰与可验证正确性。
+- 当前不追求生产级能力（完整多层 compaction、分布式能力、工业级容错等）。
