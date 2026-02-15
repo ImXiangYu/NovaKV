@@ -356,15 +356,23 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
 bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     // 第一级：查找活跃内存 (MemTable)
     if (mem_ && mem_->Get(key, value)) {
-        LOG_DEBUG(std::string("Get hit: memtable key=") + key);
-        return true;
+        // 如果是kValue，返回true
+        // 如果是kDeletion，返回false
+        if (value.type == ValueType::kValue) {
+            LOG_DEBUG(std::string("Get hit: memtable key=") + key);
+            return true;
+        }
+        return false;
     }
 
     // 第二级：查找只读内存 (Immutable MemTable)
     // 注意：如果 MinorCompaction 正在进行，imm_ 里的数据也是最新的
     if (imm_ && imm_->Get(key, value)) {
-        LOG_DEBUG(std::string("Get hit: immutable memtable key=") + key);
-        return true;
+        if (value.type == ValueType::kValue) {
+            LOG_DEBUG(std::string("Get hit: immutable memtable key=") + key);
+            return true;
+        }
+        return false;
     }
 
     // 第三级：查找磁盘 SSTable (从新到旧)
@@ -372,16 +380,20 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     // 先倒序遍历 levels_[0]（L0 新到旧）
     for (size_t i = levels_[0].size(); i-- > 0;) {
         if (levels_[0][i]->Get(key, &value.value)) {
-            LOG_DEBUG(std::string("Get hit in L0: sstable key=") + key);
-            return true;
+            if (value.type == ValueType::kValue) {
+               LOG_DEBUG(std::string("Get hit in L0: sstable key=") + key);
+               return true;
+            }
         }
     }
 
     // 再倒序遍历 levels_[1]（L1 新到旧）
     for (size_t i = levels_[1].size(); i-- > 0;) {
         if (levels_[1][i]->Get(key, &value.value)) {
-            LOG_DEBUG(std::string("Get hit in L1: sstable key=") + key);
-            return true;
+            if (value.type == ValueType::kValue) {
+                LOG_DEBUG(std::string("Get hit in L1: sstable key=") + key);
+                return true;
+            }
         }
     }
 

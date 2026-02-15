@@ -12,6 +12,11 @@ void PutValue(DBImpl& db, const std::string& key, const std::string& value) {
     db.Put(key, record);
 }
 
+void PutDeletion(DBImpl& db, const std::string& key) {
+    ValueRecord record{ValueType::kDeletion, ""};
+    db.Put(key, record);
+}
+
 bool GetValue(const DBImpl& db, const std::string& key, std::string& value) {
     ValueRecord record{ValueType::kValue, ""};
     if (!db.Get(key, record)) {
@@ -73,7 +78,21 @@ TEST_F(DBImplTest, OverwriteAndRemove) {
     // EXPECT_FALSE(db.Get("key2", val));
 }
 
-// 3. 恢复逻辑：WAL 崩溃恢复全流程测试
+// 3. 语义回归：GET 命中 tombstone 时应返回未命中
+TEST_F(DBImplTest, GetTreatsTombstoneAsMissInMemTable) {
+    DBImpl db(test_db_path);
+
+    PutValue(db, "k", "v1");
+    PutDeletion(db, "k");
+
+    std::string val;
+    EXPECT_FALSE(GetValue(db, "k", val));
+
+    ValueRecord raw{ValueType::kValue, ""};
+    EXPECT_FALSE(db.Get("k", raw));
+}
+
+// 4. 恢复逻辑：WAL 崩溃恢复全流程测试
 TEST_F(DBImplTest, CrashRecoveryDeepTest) {
     {
         DBImpl db(test_db_path);
@@ -92,7 +111,7 @@ TEST_F(DBImplTest, CrashRecoveryDeepTest) {
     EXPECT_EQ(val, "node_b");
 }
 
-// 4. 边界逻辑：跨层查找测试 (内存 + 磁盘混合查找)
+// 5. 边界逻辑：跨层查找测试 (内存 + 磁盘混合查找)
 TEST_F(DBImplTest, MixedLayerSearch) {
     DBImpl db(test_db_path);
 
@@ -113,7 +132,7 @@ TEST_F(DBImplTest, MixedLayerSearch) {
     EXPECT_EQ(val, "active_val");
 }
 
-// 5. 压力逻辑：大 Value 触发落盘一致性测试
+// 6. 压力逻辑：大 Value 触发落盘一致性测试
 TEST_F(DBImplTest, LargeValueCompaction) {
     DBImpl db(test_db_path);
 
@@ -132,7 +151,7 @@ TEST_F(DBImplTest, LargeValueCompaction) {
     EXPECT_EQ(result[0], 'X');
 }
 
-// 6. 多 SST 版本优先级：验证同 key 在多层 SST 中返回最新值
+// 7. 多 SST 版本优先级：验证同 key 在多层 SST 中返回最新值
 TEST_F(DBImplTest, NewestSSTableWins) {
     DBImpl db(test_db_path);
 

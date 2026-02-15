@@ -16,6 +16,7 @@
 - Build environment is WSL; do not run host-side `cmake`/build commands in this workspace session.
 - After each completed feature, remind to check items in `docs/TODO.md`.
 - If QPS is explicitly requested or needed, provide a QPS note and clearly mark newly added feature(s), even when QPS shows no significant change.
+- When external semantics (`SET/GET/DEL/SCAN`) change, sync interface definitions, tests, and docs in the same change.
 
 ## Project Positioning
 - Build a LevelDB-like KV database with a client-server architecture for interview demonstration.
