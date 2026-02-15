@@ -49,10 +49,12 @@
 - **MANIFEST**: Currently persists/reloads `next_file_number_`.
 - **Gap**: Full version metadata (tracking which files belong to which level) is not yet complete.
 
-## Near-Term Design Direction
+## Near-Term Task Direction (Synced with `docs/TODO.md`)
 - Keep storage and networking as separate modules with explicit boundaries.
-- **Storage first**: Close correctness gaps in delete semantics, recovery metadata (Manifest enhancement), and background tasks.
-- **Networking next**: Introduce server/client protocol and concurrency model (`epoll` or equivalent abstraction) as a first-class interview topic.
+- **Current priority**: Phase 1 (delete semantics full chain + tests).
+- **Then**: Phase 2 (Manifest/version metadata completion + WAL lifecycle closure + recovery tests).
+- **Then**: Phase 3 (concurrency policy and background flush/compaction tasks).
+- **After storage milestones**: Phase 6/7 networking (`epoll + thread pool` direction, or platform-equivalent abstraction).
 
 ## How To Use In New Chat
-- First message: "Please read `docs/AGENT_CONTEXT.md` and continue from there."
+- First message: "Please read `docs/AGENT.md` and `docs/TODO.md` and continue from there."

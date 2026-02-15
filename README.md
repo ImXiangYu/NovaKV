@@ -69,7 +69,7 @@ docs/        学习笔记、阶段总结、路线文档
 
 ## 文档与路线
 - 路线与优先级：`docs/TODO.md`
-- 协作上下文：`docs/AGENT_CONTEXT.md`
+- 协作上下文：`docs/AGENT.md`
 - 学习笔记：`docs/` 目录下各专题文档
 
 ## 文档策略
