@@ -17,6 +17,13 @@ void PutDeletion(DBImpl& db, const std::string& key) {
     db.Put(key, record);
 }
 
+void ForceMinorCompaction(DBImpl& db, const std::string& prefix) {
+    for (int i = 0; i < 1000; ++i) {
+        PutValue(db, prefix + "_fill_" + std::to_string(i), "v");
+    }
+    PutValue(db, prefix + "_trigger", "x");
+}
+
 bool GetValue(const DBImpl& db, const std::string& key, std::string& value) {
     ValueRecord record{ValueType::kValue, ""};
     if (!db.Get(key, record)) {
@@ -170,4 +177,41 @@ TEST_F(DBImplTest, NewestSSTableWins) {
     std::string val;
     EXPECT_TRUE(GetValue(db, "dup", val));
     EXPECT_EQ(val, "new");
+}
+
+// 8. Phase 1: 跨层 tombstone 应遮蔽旧值，不能“旧值复活”
+TEST_F(DBImplTest, TombstoneInNewerLevelHidesOlderValue) {
+    DBImpl db(test_db_path);
+
+    // 第一次形成 L1：k=old
+    PutValue(db, "k", "old");
+    ForceMinorCompaction(db, "round1");
+    ForceMinorCompaction(db, "round2");
+
+    // 第二次形成更新的 L1：k=tombstone
+    PutDeletion(db, "k");
+    ForceMinorCompaction(db, "round3");
+    ForceMinorCompaction(db, "round4");
+
+    std::string val;
+    EXPECT_FALSE(GetValue(db, "k", val));
+
+    ValueRecord raw{ValueType::kValue, ""};
+    EXPECT_FALSE(db.Get("k", raw));
+}
+
+// 9. Phase 1: 删除语义在重启后仍应生效
+TEST_F(DBImplTest, DeletionSemanticsSurviveRestart) {
+    {
+        DBImpl db(test_db_path);
+        PutValue(db, "k", "v1");
+        PutDeletion(db, "k");
+    }
+
+    DBImpl db_recovered(test_db_path);
+    std::string val;
+    EXPECT_FALSE(GetValue(db_recovered, "k", val));
+
+    ValueRecord raw{ValueType::kValue, ""};
+    EXPECT_FALSE(db_recovered.Get("k", raw));
 }
