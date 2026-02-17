@@ -79,7 +79,9 @@ class MemTable {
             std::unique_lock<std::shared_mutex> lock(rw_lock_);
             // 关键：先写日志，再改内存！
             // Put 写 kValue, Remove 写 kDeletion
-            wal_.AddLog(Serialize(key), Serialize(value), ValueType::kValue);
+            if constexpr (std::is_same_v<V, ValueRecord>) {
+                wal_.AddLog(Serialize(key), value.value, value.type);
+            }
             // 加锁后直接调用insert方式
             table_.insert_element(key, value);
         }
