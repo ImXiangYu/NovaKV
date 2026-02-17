@@ -387,13 +387,12 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
         }
     }
 
-    // 再倒序遍历 levels_[1]（L1 新到旧）
     for (size_t i = levels_[1].size(); i-- > 0;) {
-        if (levels_[1][i]->Get(key, &value.value)) {
-            if (value.type == ValueType::kValue) {
-                LOG_DEBUG(std::string("Get hit in L1: sstable key=") + key);
-                return true;
-            }
+        ValueRecord rec{ValueType::kDeletion, ""};
+        if (levels_[1][i]->GetRecord(key, &rec)) {
+            if (value.type == ValueType::kDeletion) return false;
+            value = rec;
+            return true;
         }
     }
 
