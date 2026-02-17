@@ -379,11 +379,11 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     // 越晚生成的 SST 文件，数据越新，所以要逆序遍历
     // 先倒序遍历 levels_[0]（L0 新到旧）
     for (size_t i = levels_[0].size(); i-- > 0;) {
-        if (levels_[0][i]->Get(key, &value.value)) {
-            if (value.type == ValueType::kValue) {
-               LOG_DEBUG(std::string("Get hit in L0: sstable key=") + key);
-               return true;
-            }
+        ValueRecord rec{ValueType::kDeletion, ""};
+        if (levels_[0][i]->GetRecord(key, &rec)) {
+            if (value.type == ValueType::kDeletion) return false;
+            value = rec;
+            return true;
         }
     }
 

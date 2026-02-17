@@ -147,32 +147,40 @@ bool SSTableReader::ReadIndexBlock() {
     return !index_entries_.empty();
 }
 
+// 兼容旧接口
 bool SSTableReader::Get(const std::string &key, std::string *value) {
+    ValueRecord rec{ValueType::kDeletion, ""};
+    if (!GetRecord(key, &rec)) return false;
+    if (rec.type == ValueType::kDeletion) return false;
+    *value = rec.value;
+    return true;
+}
+
+bool SSTableReader::GetRecord(const std::string &key, ValueRecord *record) {
+    // 查过滤器
     // 如果过滤器说肯定不在，直接返回 false，省去后面的索引查找和数据块解析
-    if (!filter_data_.empty()) {
-        if (!BloomFilter::KeyMayMatch(key, filter_data_)) {
-            LOG_DEBUG(std::string("BloomFilter blocked key: ") + key);
-            return false;
-        }
+    if (!filter_data_.empty() && !BloomFilter::KeyMayMatch(key, filter_data_)) {
+        LOG_DEBUG(std::string("BloomFilter blocked key: ") + key);
+        return false;
     }
 
-    // 1. 在索引中二分查找 (使用 std::lower_bound)
+    // 二分找block
+    // 在索引中二分查找 (使用 std::lower_bound)
     // 查找第一个 last_key >= key 的索引条目
     auto it = std::lower_bound(index_entries_.begin(), index_entries_.end(), key,
         [](const IndexEntry& entry, const std::string& k) {
             return entry.last_key < k;
         });
-
     // 如果没找到符合条件的 Block，说明 key 大于文件中所有的 key
     if (it == index_entries_.end()) {
         return false;
     }
 
-    // 2. 根据索引条目定位到具体的 Data Block
+    // 根据索引条目定位到具体的 Data Block
     const char* block_ptr = static_cast<const char*>(data_) + it->handle.offset;
     uint64_t block_size = it->handle.size;
 
-    // 3. 在 Data Block 内部进行扫描
+    // 在 Data Block 内部进行扫描
     // Data Block 布局: [KeyLen][Key][ValLen][Val] ...
     uint64_t pos = 0;
     while (pos < block_size) {
@@ -198,9 +206,14 @@ bool SSTableReader::Get(const std::string &key, std::string *value) {
 
         // 匹配检查
         if (curr_key == key) {
-            if (type == ValueType::kDeletion) return false;
-            value->assign(block_ptr + pos, val_len);
-            return true; // 找到了！
+            record->type = type;
+            if (type == ValueType::kValue) {
+                record->value.assign(block_ptr + pos, val_len);
+            } else {
+                // 如果是kDeletion
+                record->value.clear();
+            }
+            return true;
         }
 
         // 没找着，跳过当前 Value 继续扫下一个 KV

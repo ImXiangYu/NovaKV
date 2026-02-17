@@ -21,6 +21,8 @@ class SSTableReader {
 
         // 查询 Key
         bool Get(const std::string& key, std::string* value);
+        // 类型感知 Get
+        bool GetRecord(const std::string& key, ValueRecord* record);
 
         // 遍历/导出
         void ForEach(const std::function<void(const std::string &, const std::string &, ValueType)> &cb) const;
