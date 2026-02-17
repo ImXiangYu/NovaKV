@@ -41,7 +41,7 @@ DBImpl::DBImpl(std::string db_path)
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
     const std::string wal_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".wal";
-    mem_ = new MemTable<std::string, ValueRecord>(wal_path);
+    mem_ = new MemTable(wal_path);
 
     // 恢复WAL
     RecoverFromWals();
@@ -79,7 +79,7 @@ void DBImpl::MinorCompaction() {
 
     // 2. 开启全新的 mem_ 和新的 WAL 文件
     std::string new_wal = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".wal";
-    mem_ = new MemTable<std::string, ValueRecord>(new_wal);
+    mem_ = new MemTable(new_wal);
 
     // 3. 将 imm_ 落盘为 SSTable
     std::string sst_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".sst";
@@ -127,7 +127,7 @@ void DBImpl::MinorCompaction() {
     imm_ = nullptr;
 }
 
-void DBImpl::RecoverFromWals() {
+void DBImpl::RecoverFromWals() const {
     LOG_INFO(std::string("Recover from wals start."));
     // 扫描目录找出所有 .wal（数字文件名）。
     std::vector<int> wals;
@@ -401,7 +401,7 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
 }
 
 
-void DBImpl::Put(const std::string &key, ValueRecord &value) {
+void DBImpl::Put(const std::string &key, const ValueRecord &value) {
     // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
     if (mem_->Count() >= 1000) {
         if (imm_ != nullptr) {

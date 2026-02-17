@@ -19,7 +19,7 @@ class DBImpl {
         explicit DBImpl(std::string db_path);
         ~DBImpl();
 
-        void Put(const std::string& key, ValueRecord& value);
+        void Put(const std::string& key, const ValueRecord& value);
         bool Get(const std::string& key, ValueRecord& value) const;
         void CompactL0ToL1();
         size_t LevelSize(size_t level) const;
@@ -33,7 +33,7 @@ class DBImpl {
 
     private:
         void MinorCompaction();
-        void RecoverFromWals(); // 关键：启动时自动恢复逻辑
+        void RecoverFromWals() const; // 关键：启动时自动恢复逻辑
         void LoadSSTables();
 
         // 管理next_file_number_
@@ -45,8 +45,8 @@ class DBImpl {
         int next_file_number_;
 
         // 内存层：解耦后的指针
-        MemTable<std::string, ValueRecord> *mem_;
-        MemTable<std::string, ValueRecord> *imm_;
+        MemTable *mem_;
+        MemTable *imm_;
 
         // 磁盘层：已打开的 SST 列表
         // levels_[0] 是 L0，levels_[1] 是 L1
