@@ -127,7 +127,7 @@ void DBImpl::MinorCompaction() {
     imm_ = nullptr;
 }
 
-void DBImpl::RecoverFromWals() const {
+void DBImpl::RecoverFromWals() {
     LOG_INFO(std::string("Recover from wals start."));
     // 扫描目录找出所有 .wal（数字文件名）。
     std::vector<int> wals;

@@ -90,7 +90,7 @@ class SkipList {
             ++node_count;
             return true;
         }
-        bool search_element(K key, V& value) {
+        bool search_element(K key, V& value) const {
             // 1. 从 head 开始，从当前最高层 (current_level - 1) 往下找
             Node* curr = head;
             for (int i = current_level - 1; i >= 0; i--) {
@@ -225,11 +225,11 @@ class SkipList {
         }
 
     private:
-        Node* create_node(K k, V v, int level) {
+        static Node* create_node(K k, V v, int level) {
             return new Node(k, v, level);
         }
 
-        int get_random_level() {
+        int get_random_level() const {
             // 静态变量确保生成器只初始化一次，提升性能并保证随机性
             static std::mt19937 gen(std::random_device{}());
             static std::uniform_real_distribution<float> dis(0.0f, 1.0f);

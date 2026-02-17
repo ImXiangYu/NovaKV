@@ -1,9 +1,17 @@
 #include <gtest/gtest.h>
+
+#include <filesystem>
+#include <string>
 #include <thread>
 #include <vector>
-#include <string>
-#include <filesystem>
+
 #include "MemTable.h"
+
+namespace {
+ValueRecord MakeValue(const std::string& value) {
+    return ValueRecord{ValueType::kValue, value};
+}
+} // namespace
 
 // 定义一个基础 Fixture，统一管理文件清理逻辑
 class MemTableBaseTest : public ::testing::Test {
@@ -28,34 +36,39 @@ protected:
 // --- 第一部分：逻辑与并发测试 (使用 basic_log) ---
 
 TEST_F(MemTableBaseTest, BasicOperations) {
-    MemTable<int, std::string> mt(basic_log);
-    mt.Put(1, "apple");
-    mt.Put(2, "banana");
+    MemTable mt(basic_log);
 
-    std::string val;
-    EXPECT_TRUE(mt.Get(1, val));
-    EXPECT_EQ(val, "apple");
+    mt.Put("k1", MakeValue("apple"));
+    mt.Put("k2", MakeValue("banana"));
 
-    mt.Put(1, "cherry");
-    EXPECT_TRUE(mt.Get(1, val));
-    EXPECT_EQ(val, "cherry");
+    ValueRecord rec{ValueType::kDeletion, ""};
+    EXPECT_TRUE(mt.Get("k1", rec));
+    EXPECT_EQ(rec.type, ValueType::kValue);
+    EXPECT_EQ(rec.value, "apple");
 
-    EXPECT_TRUE(mt.Remove(2));
-    EXPECT_FALSE(mt.Get(2, val));
-    EXPECT_EQ(mt.Count(), 1);
+    mt.Put("k1", MakeValue("cherry"));
+    EXPECT_TRUE(mt.Get("k1", rec));
+    EXPECT_EQ(rec.type, ValueType::kValue);
+    EXPECT_EQ(rec.value, "cherry");
+
+    EXPECT_TRUE(mt.Remove("k2"));
+    EXPECT_TRUE(mt.Get("k2", rec));
+    EXPECT_EQ(rec.type, ValueType::kDeletion);
+    EXPECT_TRUE(rec.value.empty());
+    EXPECT_EQ(mt.Count(), 2);
 }
 
 TEST_F(MemTableBaseTest, BulkInsert) {
-    MemTable<int, int> mt(basic_log);
-    int n = 10000;
+    MemTable mt(basic_log);
+    const int n = 10000;
     for (int i = 0; i < n; ++i) {
-        mt.Put(i, i * 2);
+        mt.Put("k_" + std::to_string(i), MakeValue("v_" + std::to_string(i)));
     }
     EXPECT_EQ(mt.Count(), n);
 }
 
 TEST_F(MemTableBaseTest, ConcurrentReadWrite) {
-    MemTable<int, int> mt(basic_log);
+    MemTable mt(basic_log);
     const int num_writers = 4;
     const int ops_per_thread = 2000;
     std::vector<std::thread> workers;
@@ -63,12 +76,15 @@ TEST_F(MemTableBaseTest, ConcurrentReadWrite) {
     for (int i = 0; i < num_writers; ++i) {
         workers.emplace_back([&mt, i, ops_per_thread]() {
             for (int j = 0; j < ops_per_thread; ++j) {
-                mt.Put(i * ops_per_thread + j, j);
+                const std::string key = "k_" + std::to_string(i * ops_per_thread + j);
+                mt.Put(key, MakeValue("v_" + std::to_string(j)));
             }
         });
     }
 
-    for (auto& t : workers) t.join();
+    for (auto& t : workers) {
+        t.join();
+    }
     EXPECT_EQ(mt.Count(), num_writers * ops_per_thread);
 }
 
@@ -76,45 +92,46 @@ TEST_F(MemTableBaseTest, ConcurrentReadWrite) {
 
 TEST_F(MemTableBaseTest, NoAutoRecoveryOnReopen) {
     {
-        MemTable<int, std::string> mt(persistence_log);
-        mt.Put(1, "apple");
-        mt.Put(2, "banana");
-        mt.Remove(1);
+        MemTable mt(persistence_log);
+        mt.Put("a", MakeValue("apple"));
+        mt.Put("b", MakeValue("banana"));
+        mt.Remove("a");
     } // mt 析构
 
-    MemTable<int, std::string> mt_new(persistence_log);
-    std::string val;
+    MemTable mt_new(persistence_log);
+    ValueRecord rec{ValueType::kDeletion, ""};
     // 恢复职责已经上移到 DBImpl，MemTable 构造不再自动回放 WAL。
     EXPECT_EQ(mt_new.Count(), 0);
-    EXPECT_FALSE(mt_new.Get(1, val));
-    EXPECT_FALSE(mt_new.Get(2, val));
+    EXPECT_FALSE(mt_new.Get("a", rec));
+    EXPECT_FALSE(mt_new.Get("b", rec));
 }
 
-TEST_F(MemTableBaseTest, ManualReplayCanRecoverData) {
+TEST_F(MemTableBaseTest, ManualReplayCanRecoverDataAndTombstone) {
     const int count = 1000;
     {
-        MemTable<int, int> mt(persistence_log);
+        MemTable mt(persistence_log);
         for (int i = 0; i < count; ++i) {
-            mt.Put(i, i * 10);
+            mt.Put("k_" + std::to_string(i), MakeValue("v_" + std::to_string(i)));
         }
+        mt.Remove("k_500");
     } // 模拟崩溃
 
-    MemTable<int, int> mt_recovery(persistence_log);
+    MemTable mt_recovery(persistence_log);
     EXPECT_EQ(mt_recovery.Count(), 0);
 
     WalHandler wal(persistence_log);
     wal.LoadLog([&mt_recovery](ValueType type, const std::string& k, const std::string& v) {
-        if (type == ValueType::kValue) {
-            int key;
-            int value;
-            std::memcpy(&key, k.data(), sizeof(int));
-            std::memcpy(&value, v.data(), sizeof(int));
-            mt_recovery.ApplyWithoutWal(key, value);
-        }
+        mt_recovery.ApplyWithoutWal(k, ValueRecord{type, v});
     });
 
     EXPECT_EQ(mt_recovery.Count(), count);
-    int val;
-    EXPECT_TRUE(mt_recovery.Get(500, val));
-    EXPECT_EQ(val, 5000);
+
+    ValueRecord rec{ValueType::kDeletion, ""};
+    EXPECT_TRUE(mt_recovery.Get("k_10", rec));
+    EXPECT_EQ(rec.type, ValueType::kValue);
+    EXPECT_EQ(rec.value, "v_10");
+
+    EXPECT_TRUE(mt_recovery.Get("k_500", rec));
+    EXPECT_EQ(rec.type, ValueType::kDeletion);
+    EXPECT_TRUE(rec.value.empty());
 }

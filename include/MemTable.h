@@ -37,7 +37,7 @@ class MemTable {
             table_.insert_element(key, value);
         }
         // 查询
-        bool Get(const std::string& key, ValueRecord& value) {
+        bool Get(const std::string& key, ValueRecord& value) const {
             // 加个读锁，确保同一时间多个线程可以同时读
             std::shared_lock lock(rw_lock_);
             return table_.search_element(key, value);
