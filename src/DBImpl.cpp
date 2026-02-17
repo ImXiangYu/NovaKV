@@ -381,7 +381,7 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     for (size_t i = levels_[0].size(); i-- > 0;) {
         ValueRecord rec{ValueType::kDeletion, ""};
         if (levels_[0][i]->GetRecord(key, &rec)) {
-            if (value.type == ValueType::kDeletion) return false;
+            if (rec.type == ValueType::kDeletion) return false;
             value = rec;
             return true;
         }
@@ -390,7 +390,7 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
     for (size_t i = levels_[1].size(); i-- > 0;) {
         ValueRecord rec{ValueType::kDeletion, ""};
         if (levels_[1][i]->GetRecord(key, &rec)) {
-            if (value.type == ValueType::kDeletion) return false;
+            if (rec.type == ValueType::kDeletion) return false;
             value = rec;
             return true;
         }
