@@ -41,6 +41,9 @@ class DBImpl {
         // 负责计算并设置next_file_number_
         void InitNextFileNumberFromDisk();
 
+        // 辅助检查
+        bool HasVisibleValueInL1(const std::string& key) const;
+
         std::string db_path_;
         int next_file_number_;
 

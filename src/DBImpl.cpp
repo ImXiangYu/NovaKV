@@ -217,6 +217,19 @@ void DBImpl::InitNextFileNumberFromDisk() {
     }
     next_file_number_ = max_id;
 }
+bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
+    for (size_t i = levels_[1].size(); i-- > 0;) {
+        ValueRecord rec{ValueType::kDeletion, ""};
+        if (levels_[1][i]->GetRecord(key, &rec)) {
+            if (rec.type == ValueType::kDeletion) {
+                return false;
+            }
+            return true;
+        }
+    }
+    // 没找到
+    return false;
+}
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
     if (levels_[0].empty()) return;
@@ -242,21 +255,34 @@ void DBImpl::CompactL0ToL1() {
     WritableFile file(new_sst_path);
     SSTableBuilder builder(&file);
 
-    for (const auto& pair : mp) {
-        if (pair.second.type == ValueType::kValue) {
-            builder.Add(pair.first, pair.second.value, ValueType::kValue);
+    // 确认需要输出sst
+    bool has_output = false;
+    for (const auto&[key, record] : mp) {
+        if (record.type == ValueType::kValue) {
+            builder.Add(key, record.value, ValueType::kValue);
+            has_output = true;
         } else {
-            // 如果是kDeletion，就写tombstone
-            builder.Add(pair.first, "", ValueType::kDeletion);
+            // 如果是kDeletion，就按条件写
+            if (HasVisibleValueInL1(key)) {
+                // 需要遮蔽旧值
+                builder.Add(key, "", ValueType::kDeletion);
+                has_output = true;
+                // 不需要就不写，意味着删除
+            }
         }
     }
     builder.Finish();
     file.Flush();
 
-    if (SSTableReader* reader = SSTableReader::Open(new_sst_path)) {
-        LOG_INFO(std::string("SSTable created: ") + new_sst_path);
-        // 暂不做 L1 合并，后续会引入更低层压实
-        levels_[1].push_back(reader);
+    if (has_output) {
+        if (SSTableReader* reader = SSTableReader::Open(new_sst_path)) {
+            LOG_INFO(std::string("SSTable created: ") + new_sst_path);
+            // 暂不做 L1 合并，后续会引入更低层压实
+            levels_[1].push_back(reader);
+        }
+    } else {
+        // 没输出就删除
+        fs::remove(new_sst_path);
     }
 
     for (auto reader : levels_[0]) {

@@ -18,6 +18,11 @@ void PutValue(DBImpl& db, const std::string& key, const std::string& value) {
     db.Put(key, record);
 }
 
+void PutDeletion(DBImpl& db, const std::string& key) {
+    ValueRecord record{ValueType::kDeletion, ""};
+    db.Put(key, record);
+}
+
 bool GetValue(DBImpl& db, const std::string& key, std::string& value) {
     ValueRecord record{ValueType::kValue, ""};
     if (!db.Get(key, record)) {
@@ -163,4 +168,34 @@ TEST_F(CompactionTest, NextFileNumberMonotonicAcrossRestart) {
 
     const int max_id_after_restart = MaxDataFileNumber(test_db_path);
     EXPECT_GT(max_id_after_restart, max_id_before_restart);
+}
+
+// Test Intent:
+// 当 L0->L1 compaction 的输入全是“可安全清理”的 tombstone（L1 不存在旧 value）时，
+// 不应在 L1 产生新的 SST，也不应在磁盘残留新的空 SST 文件。
+TEST_F(CompactionTest, CompactDropsBottomMostTombstonesWithoutCreatingNewSST) {
+    DBImpl db(test_db_path);
+
+    // 构造一个仅包含 tombstone 的 L0 SST：
+    // 第 1001 次写入前会触发一次 MinorCompaction，前 1000 条 tombstone 落入 L0。
+    for (int i = 0; i <= 1000; ++i) {
+        PutDeletion(db, "ghost_" + std::to_string(i));
+    }
+
+    ASSERT_EQ(db.LevelSize(0), 1u);
+    ASSERT_EQ(db.LevelSize(1), 0u);
+
+    const int max_id_before = MaxDataFileNumber(test_db_path);
+    ASSERT_GE(max_id_before, 0);
+
+    db.CompactL0ToL1();
+
+    EXPECT_EQ(db.LevelSize(0), 0u);
+    EXPECT_EQ(db.LevelSize(1), 0u);
+
+    const int max_id_after = MaxDataFileNumber(test_db_path);
+    EXPECT_EQ(max_id_after, max_id_before);
+
+    std::string val;
+    EXPECT_FALSE(GetValue(db, "ghost_10", val));
 }
