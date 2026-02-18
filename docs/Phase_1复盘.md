@@ -126,6 +126,26 @@
 
 ---
 
+## 2.8 问题H（收尾）：tombstone 清理时机不完整
+
+### 现象
+- 虽然 tombstone 已能跨层遮蔽旧值，但 compaction 阶段尚未实现“最底层条件清理”。
+- 长期保留无必要 tombstone 会增加空间与读取遍历负担。
+
+### 根因
+- `L0 -> L1` 合并时，对 `kDeletion` 采用无条件写出策略。
+
+### 修复
+- 新增 `HasVisibleValueInL1(key)` 判定逻辑：仅当旧 `L1` 仍有可见旧值时保留 tombstone。
+- `CompactL0ToL1()` 改为 tombstone 条件写出：需要遮蔽才写，不需要则丢弃。
+- 增加专项测试：`CompactDropsBottomMostTombstonesWithoutCreatingNewSST`，验证可清理 tombstone 不会生成新的 L1 SST。
+
+### 价值
+- 完成 Phase 1 最后一环：删除语义从“逻辑正确”推进到“语义正确 + 空间行为合理”。
+- 为后续多层 compaction 的 tombstone 生命周期策略提供可复用判定范式。
+
+---
+
 ## 3. 如果这些问题不修，会出现什么连锁后果
 
 - `DEL` 后 `GET` 结果不稳定，甚至重启后变化。
@@ -142,17 +162,18 @@
 - WAL 透传 `ValueRecord.type/value`
 - 内存层 tombstone 语义统一
 - `GetRecord` 三态读取 + `DBImpl` 短路裁决
+- `L0 -> L1` tombstone 条件清理（仅在需要遮蔽旧值时保留）
 - 相关测试通过并同步到 TODO
 
 未完成（Phase 1 剩余）：
-- `仅在最底层满足条件时清理 tombstone`
+- 无（Phase 1 存储语义闭环已完成）
 
 ---
 
 ## 5. 本轮对后续开发的正向影响
 
 - 为 Phase 2 恢复与元数据闭环提供稳定语义前提。
-- 为后续“最底层 tombstone 清理策略”提供可靠基础。
+- 为后续多层 compaction（L1->L2...）提供 tombstone 生命周期判定模板。
 - 为网络层语义映射提供确定行为（减少协议层补丁逻辑）。
 
 ---
@@ -173,4 +194,4 @@
 
 ## 7. 一句话结论
 
-本轮不仅修了“旧值复活”，还把删除语义的入口、编码、读取、恢复和测试全部收敛到统一模型，完成了从“能跑”到“可证明正确”的关键跃迁。
+本轮不仅修了“旧值复活”，还完成了最底层条件清理 tombstone，使删除语义在入口、编码、读取、恢复、压实清理与测试上形成完整闭环。

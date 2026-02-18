@@ -12,13 +12,13 @@
   - [x] 明确 `SET/GET/DEL/SCAN` 语义定义文档
 
 ## Phase 1 - 存储语义闭环（最优先）
-- [ ] 删除语义完整链路
+- [x] 删除语义完整链路
   - [x] `MemTable` 内核化（类型收敛到 `ValueRecord`）
   - [x] `Put` 透传 `ValueRecord.type/value` 到 WAL（不再固定 `kValue`）
   - [x] 收敛泛型序列化路径，避免 `ValueRecord` 走 `memcpy` 序列化
   - [x] 内存层删除与查询语义统一
   - [x] 跨层读取时 tombstone 遮蔽旧值
-  - [ ] 仅在最底层满足条件时清理 tombstone
+  - [x] 仅在最底层满足条件时清理 tombstone
 - [x] 对应测试补齐
   - [x] `MemTable` 内核化回归测试（tombstone 写入/回放/重启）
   - [x] 删除语义测试（内存、落盘、跨层）

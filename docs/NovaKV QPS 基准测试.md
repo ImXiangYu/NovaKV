@@ -150,3 +150,25 @@ BenchPut       183782 ns        18661 ns        39637 items_per_second=53.588k/s
 BenchGet         1488 ns         1342 ns       510886 items_per_second=745.205k/s
 ```
 
+完成了删除语义闭环（WAL 透传、跨层 tombstone 遮蔽、最底层条件清理），语义正确性显著增强；预计 QPS 无结构性变化，波动主要来自 compaction 触发时机与环境噪声。
+```
+2026-02-18T23:38:03+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 0.76, 0.72, 0.35
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       169363 ns        18284 ns        40288 items_per_second=54.693k/s
+BenchGet         1237 ns         1226 ns       551235 items_per_second=815.88k/s
+```
+
+
+
