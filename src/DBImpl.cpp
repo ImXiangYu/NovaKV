@@ -50,8 +50,11 @@ DBImpl::DBImpl(std::string db_path)
 
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
-    const std::string wal_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".wal";
+    const uint64_t new_wal_id = AllocateFileNumber();
+    const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
+    manifest_state_.live_wals.insert(new_wal_id);
+    PersistManifestState();
 
     // 恢复WAL
     RecoverFromWals();
