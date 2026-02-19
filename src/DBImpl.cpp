@@ -399,6 +399,7 @@ bool DBImpl::LoadManifestState() {
             manifest_state_.sst_levels[file_number] = level;
         }
 
+        manifest_state_.live_wals.clear();
         if (!ifs.read(reinterpret_cast<char*>(&wal_count), sizeof(wal_count))) return false;
         for (uint32_t i = 0; i < wal_count; ++i) {
             uint64_t wal_id = 0;
