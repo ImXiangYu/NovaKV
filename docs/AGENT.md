@@ -18,6 +18,7 @@
   - Tests can be written directly but must include **Test Intent**.
 - **Environment Constraints**:
   - **Current Environment: Windows PowerShell.**
+  - `rg` is available; prefer `rg` / `rg --files` for search and file discovery, and avoid `Get-Content` unless absolutely necessary.
   - All path separators, script calls, and build commands must be compatible with PowerShell syntax.
   - Do not run `cmake` or build commands directly in this workspace session.
 - **Workflow**:
