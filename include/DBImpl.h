@@ -5,14 +5,16 @@
 #ifndef NOVAKV_DBIMPL_H
 #define NOVAKV_DBIMPL_H
 
-#include <string>
 #include "MemTable.h"
-
-#include <vector>
-#include <mutex>
-
 #include "DBIterator.h"
 #include "SSTableReader.h"
+#include <string>
+#include <vector>
+#include <mutex>
+#include <optional>
+#include <unordered_set>
+
+
 
 class DBImpl {
     public:
@@ -28,8 +30,19 @@ class DBImpl {
         bool LoadNextFileNumberFromManifest();
         void PersistNextFileNumber() const;
 
+        // 使用Manifest记录sst状态
+        bool LoadManifestState();
+        void PersistManifestState();
+
         // 迭代器
         std::unique_ptr<DBIterator> NewIterator();
+
+        struct ManifestState {
+            uint64_t next_file_number = 0;
+            std::unordered_map<uint64_t, uint32_t> sst_levels; // file_number -> level
+            std::unordered_set<uint64_t> live_wals;            // 为多 WAL 恢复闭环预留
+        };
+        ManifestState manifest_state_;
 
     private:
         void MinorCompaction();

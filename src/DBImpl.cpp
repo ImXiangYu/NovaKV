@@ -14,6 +14,16 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+struct LiveSSTMeta {
+    uint64_t file_number;
+    uint32_t level;
+};
+
+constexpr uint32_t kManifestMagic = 0x12345678; // 自定义
+constexpr uint32_t kManifestVersion = 1;
+} // 匿名
+
 DBImpl::DBImpl(std::string db_path)
     : db_path_(std::move(db_path)), next_file_number_(0), imm_(nullptr) {
 
@@ -310,9 +320,10 @@ bool DBImpl::LoadNextFileNumberFromManifest() {
     }
 
     if (std::ifstream ifs(p, std::ios::binary); ifs) {
-        if (ifs.read(reinterpret_cast<char*>(&next_file_number_), sizeof(next_file_number_))) {
-            return true;
+        if (!ifs.read(reinterpret_cast<char*>(&next_file_number_), sizeof(next_file_number_))) {
+            return false;
         }
+        return true;
     }
 
     return next_file_number_ >= 0;
@@ -343,6 +354,115 @@ void DBImpl::PersistNextFileNumber() const {
     // 原子替换：将 tmp 重命名为正式文件
     fs::rename(tmp_path, final_path);
 }
+
+bool DBImpl::LoadManifestState() {
+    // 将写入元数据文件中的State读出来
+    // 在db_path_中找一个MANIFEST文件
+    LOG_INFO("Load manifest state start.");
+    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
+        LOG_ERROR("DB Path error: " + db_path_);
+        return false;
+    }
+
+    const fs::path p = fs::path(db_path_) / "MANIFEST";
+
+    if (!fs::exists(p)) {
+        return false;
+    }
+
+    if (std::ifstream ifs(p, std::ios::binary); ifs) {
+        // 文件布局:
+        // magic, version, next_file_number, sst_count,
+        // [file_number, level] * sst_count, wal_count, [wal_id] * wal_count
+        uint32_t magic = 0;
+        uint32_t version = 0;
+        uint64_t next_file_number = 0;
+        uint32_t sst_count = 0;
+        uint32_t wal_count = 0;
+
+        if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+        if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+        if (!ifs.read(reinterpret_cast<char*>(&next_file_number), sizeof(next_file_number))) return false;
+        if (!ifs.read(reinterpret_cast<char*>(&sst_count), sizeof(sst_count))) return false;
+
+        manifest_state_.next_file_number = next_file_number;
+        manifest_state_.sst_levels.clear();
+        for (uint32_t i = 0; i < sst_count; ++i) {
+            uint64_t file_number = 0;
+            uint32_t level = 0;
+            if (!ifs.read(reinterpret_cast<char*>(&file_number), sizeof(file_number))) return false;
+            if (!ifs.read(reinterpret_cast<char*>(&level), sizeof(level))) return false;
+            manifest_state_.sst_levels[file_number] = level;
+        }
+
+        if (!ifs.read(reinterpret_cast<char*>(&wal_count), sizeof(wal_count))) return false;
+        for (uint32_t i = 0; i < wal_count; ++i) {
+            uint64_t wal_id = 0;
+            if (!ifs.read(reinterpret_cast<char*>(&wal_id), sizeof(wal_id))) return false;
+            manifest_state_.live_wals.insert(wal_id);
+        }
+    }
+    LOG_INFO("Load manifest state completed.");
+    return true;
+}
+
+void DBImpl::PersistManifestState() {
+    // 将State写入元数据文件
+    // 在db_path_中找一个MANIFEST文件
+    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
+        LOG_ERROR("DB Path error: " + db_path_);
+        return;
+    }
+
+    const fs::path final_path = fs::path(db_path_) / "MANIFEST";
+    const fs::path tmp_path = fs::path(db_path_) / "MANIFEST.tmp";
+
+    // 先写入临时文件
+    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc); ofs) {
+        ofs.write(reinterpret_cast<const char*>(&kManifestMagic), sizeof(kManifestMagic));
+        ofs.write(reinterpret_cast<const char*>(&kManifestVersion), sizeof(kManifestVersion));
+        ofs.write(reinterpret_cast<const char*>(&manifest_state_.next_file_number),
+                  sizeof(manifest_state_.next_file_number));
+
+        // SST 映射数量
+        const auto sst_count = static_cast<uint32_t>(manifest_state_.sst_levels.size());
+        ofs.write(reinterpret_cast<const char*>(&sst_count), sizeof(sst_count));
+
+        // 为了文件稳定可读，按 file_number 排序后写入
+        std::vector<std::pair<uint64_t, uint32_t>> sst_entries(
+            manifest_state_.sst_levels.begin(), manifest_state_.sst_levels.end());
+        std::sort(sst_entries.begin(), sst_entries.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        for (const auto& [file_number, level] : sst_entries) {
+            ofs.write(reinterpret_cast<const char*>(&file_number), sizeof(file_number));
+            ofs.write(reinterpret_cast<const char*>(&level), sizeof(level));
+        }
+
+        // WAL 数量（你现在可先写 0 或写 live_wals 真实值）
+        const auto wal_count = static_cast<uint32_t>(manifest_state_.live_wals.size());
+        ofs.write(reinterpret_cast<const char*>(&wal_count), sizeof(wal_count));
+        for (const uint64_t wal_id : manifest_state_.live_wals) {
+            ofs.write(reinterpret_cast<const char*>(&wal_id), sizeof(wal_id));
+        }
+
+        ofs.flush(); // 确保操作系统缓冲区已接收数据
+        if (!ofs) {
+            LOG_ERROR("Failed to write MANIFEST content");
+            return;
+        }
+
+        // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
+        ofs.close();
+    } else {
+        LOG_ERROR("Failed to open MANIFEST.tmp for writing");
+        return;
+    }
+
+    // 原子替换：将 tmp 重命名为正式文件
+    fs::rename(tmp_path, final_path);
+}
+
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
     std::vector<std::pair<std::string, std::string>> rows;
     std::map<std::string, ValueRecord> seen;
