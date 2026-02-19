@@ -215,3 +215,24 @@ TEST_F(DBImplTest, DeletionSemanticsSurviveRestart) {
     ValueRecord raw{ValueType::kValue, ""};
     EXPECT_FALSE(db_recovered.Get("k", raw));
 }
+
+// 10. Phase 2: 重启后应保留 SST 所属层级，而不是把全部 SST 都塞回 L0
+// Test Intent: 为 Manifest 的“存活文件 -> 层级映射”恢复建立回归保护。
+TEST_F(DBImplTest, KeepLevelMappingAfterRestart) {
+    {
+        DBImpl db(test_db_path);
+
+        // 先制造一个可预测的层级状态：L1 有 1 个文件，L0 有 1 个文件
+        PutValue(db, "seed", "v");
+        ForceMinorCompaction(db, "phase2_round1");
+        ForceMinorCompaction(db, "phase2_round2"); // 触发 L0->L1
+        ForceMinorCompaction(db, "phase2_round3"); // 生成新的 L0
+
+        EXPECT_EQ(db.LevelSize(0), 1u);
+        EXPECT_EQ(db.LevelSize(1), 1u);
+    }
+
+    DBImpl db_recovered(test_db_path);
+    EXPECT_EQ(db_recovered.LevelSize(0), 1u);
+    EXPECT_EQ(db_recovered.LevelSize(1), 1u);
+}
