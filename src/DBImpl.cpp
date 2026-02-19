@@ -88,11 +88,16 @@ void DBImpl::MinorCompaction() {
     LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm_->Count()));
 
     // 2. 开启全新的 mem_ 和新的 WAL 文件
-    std::string new_wal = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".wal";
+    uint64_t new_wal_id = AllocateFileNumber();
+    active_wal_id_ = new_wal_id;
+    std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(new_wal);
+    manifest_state_.live_wals.insert(new_wal_id);
+    PersistManifestState();
 
     // 3. 将 imm_ 落盘为 SSTable
-    std::string sst_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".sst";
+    uint64_t new_sst_id = AllocateFileNumber();
+    std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
 
     // 封装落盘逻辑
     {

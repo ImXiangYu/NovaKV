@@ -63,6 +63,9 @@ class DBImpl {
         // levels_[0] 是 L0，levels_[1] 是 L1
         std::vector<std::vector<SSTableReader*>> levels_;
 
+        // 维护active_wal_id_
+        uint64_t active_wal_id_ = 0;
+
         // 保护元数据和 mem/imm 切换的锁
         std::mutex mutex_;
 };
