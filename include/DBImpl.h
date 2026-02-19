@@ -26,23 +26,12 @@ class DBImpl {
         void CompactL0ToL1();
         size_t LevelSize(size_t level) const;
 
-        // 记录与恢复next_file_number_
-        bool LoadNextFileNumberFromManifest();
-        void PersistNextFileNumber() const;
-
         // 使用Manifest记录sst状态
         bool LoadManifestState();
         void PersistManifestState();
 
         // 迭代器
         std::unique_ptr<DBIterator> NewIterator();
-
-        struct ManifestState {
-            uint64_t next_file_number = 0;
-            std::unordered_map<uint64_t, uint32_t> sst_levels; // file_number -> level
-            std::unordered_set<uint64_t> live_wals;            // 为多 WAL 恢复闭环预留
-        };
-        ManifestState manifest_state_;
 
     private:
         void MinorCompaction();
@@ -57,8 +46,14 @@ class DBImpl {
         // 辅助检查
         bool HasVisibleValueInL1(const std::string& key) const;
 
+        struct ManifestState {
+            uint64_t next_file_number = 0;
+            std::unordered_map<uint64_t, uint32_t> sst_levels; // file_number -> level
+            std::unordered_set<uint64_t> live_wals;            // 为多 WAL 恢复闭环预留
+        };
+        ManifestState manifest_state_;
+
         std::string db_path_;
-        int next_file_number_;
 
         // 内存层：解耦后的指针
         MemTable *mem_;

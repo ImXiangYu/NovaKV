@@ -25,7 +25,7 @@ constexpr uint32_t kManifestVersion = 1;
 } // 匿名
 
 DBImpl::DBImpl(std::string db_path)
-    : db_path_(std::move(db_path)), next_file_number_(0), imm_(nullptr) {
+    : db_path_(std::move(db_path)), imm_(nullptr) {
 
     // 1. 确保工作目录存在
     if (!fs::exists(db_path_)) {
@@ -42,7 +42,7 @@ DBImpl::DBImpl(std::string db_path)
         // 如果失败，则读磁盘获取
         InitNextFileNumberFromDisk();
         // 获取后再写入
-        LoadManifestState();
+        PersistManifestState();
     }
 
     // 调用LoadSSTables()恢复数据
@@ -307,55 +307,6 @@ size_t DBImpl::LevelSize(const size_t level) const {
     if (level >= levels_.size()) return 0;
     return levels_[level].size();
 }
-bool DBImpl::LoadNextFileNumberFromManifest() {
-    // 将写入元数据文件中的next_file_number_读出来
-    // 在db_path_中找一个MANIFEST文件
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-
-    const fs::path p = fs::path(db_path_) / "MANIFEST";
-
-    if (!fs::exists(p)) {
-        return false;
-    }
-
-    if (std::ifstream ifs(p, std::ios::binary); ifs) {
-        if (!ifs.read(reinterpret_cast<char*>(&next_file_number_), sizeof(next_file_number_))) {
-            return false;
-        }
-        return true;
-    }
-
-    return next_file_number_ >= 0;
-}
-void DBImpl::PersistNextFileNumber() const {
-    // 将next_file_number_写入元数据文件
-    // 在db_path_中找一个MANIFEST文件
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return;
-    }
-
-    const fs::path final_path = fs::path(db_path_) / "MANIFEST";
-    const fs::path tmp_path = fs::path(db_path_) / "MANIFEST.tmp";
-
-    // 先写入临时文件
-    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc); ofs) {
-        ofs.write(reinterpret_cast<const char*>(&next_file_number_), sizeof(next_file_number_));
-        ofs.flush(); // 确保操作系统缓冲区已接收数据
-
-        // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
-        ofs.close();
-    } else {
-        LOG_ERROR("Failed to open MANIFEST.tmp for writing");
-        return;
-    }
-
-    // 原子替换：将 tmp 重命名为正式文件
-    fs::rename(tmp_path, final_path);
-}
 
 bool DBImpl::LoadManifestState() {
     // 将写入元数据文件中的State读出来
@@ -406,6 +357,9 @@ bool DBImpl::LoadManifestState() {
             if (!ifs.read(reinterpret_cast<char*>(&wal_id), sizeof(wal_id))) return false;
             manifest_state_.live_wals.insert(wal_id);
         }
+    } else {
+        LOG_INFO("Manifest file can't be opened.");
+        return false;
     }
     LOG_INFO("Load manifest state completed.");
     return true;
