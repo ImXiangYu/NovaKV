@@ -81,6 +81,8 @@ DBImpl::~DBImpl() {
 
 void DBImpl::MinorCompaction() {
     LOG_INFO("Minor Compaction triggered...");
+    // 先保存旧wal_id
+    const uint64_t old_wal_id = active_wal_id_;
     std::string old_wal_path = mem_->GetWalPath();
 
     // 1. 冻结 mem_ 到 imm_
@@ -92,6 +94,7 @@ void DBImpl::MinorCompaction() {
     active_wal_id_ = new_wal_id;
     std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(new_wal);
+
     manifest_state_.live_wals.insert(new_wal_id);
     PersistManifestState();
 
@@ -120,13 +123,17 @@ void DBImpl::MinorCompaction() {
             std::lock_guard<std::mutex> lock(mutex_);
             levels_[0].push_back(level);
         }
+
+        manifest_state_.sst_levels[new_sst_id] = 0;
         // 删除旧 WAL 文件
-        if (std::filesystem::exists(old_wal_path)) {
-            std::filesystem::remove(old_wal_path);
+        if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
+            manifest_state_.live_wals.erase(old_wal_id);
             LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
         } else {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
         }
+
+        PersistManifestState();
     } else {
         LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
