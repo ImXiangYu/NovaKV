@@ -50,7 +50,7 @@ class DBImpl {
         void LoadSSTables();
 
         // 管理next_file_number_
-        int AllocateFileNumber();
+        uint64_t AllocateFileNumber();
         // 负责计算并设置next_file_number_
         void InitNextFileNumberFromDisk();
 

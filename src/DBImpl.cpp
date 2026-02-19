@@ -199,10 +199,10 @@ void DBImpl::LoadSSTables() {
     LOG_INFO(std::string("LoadSSTables completed"));
 }
 
-int DBImpl::AllocateFileNumber() {
+uint64_t DBImpl::AllocateFileNumber() {
     // 分配文件编号，避免到处++next_file_number_ 导致漏改。
     // 这里++之后要立即PersistNextFileNumber
-    ++next_file_number_;
+    ++manifest_state_.next_file_number;
     // PersistNextFileNumber();
     PersistManifestState();
     return manifest_state_.next_file_number;
