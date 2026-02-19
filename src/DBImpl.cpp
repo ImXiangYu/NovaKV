@@ -37,12 +37,12 @@ DBImpl::DBImpl(std::string db_path)
     // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
     levels_.resize(2);
 
-    // 先尝试从manifest中获取next_file_number_
-    if (!LoadNextFileNumberFromManifest()) {
+    // 先尝试从manifest中获取state
+    if (!LoadManifestState()) {
         // 如果失败，则读磁盘获取
         InitNextFileNumberFromDisk();
         // 获取后再写入
-        PersistNextFileNumber();
+        LoadManifestState();
     }
 
     // 调用LoadSSTables()恢复数据
@@ -203,8 +203,9 @@ int DBImpl::AllocateFileNumber() {
     // 分配文件编号，避免到处++next_file_number_ 导致漏改。
     // 这里++之后要立即PersistNextFileNumber
     ++next_file_number_;
-    PersistNextFileNumber();
-    return next_file_number_;
+    // PersistNextFileNumber();
+    PersistManifestState();
+    return manifest_state_.next_file_number;
 }
 
 void DBImpl::InitNextFileNumberFromDisk() {
@@ -225,7 +226,8 @@ void DBImpl::InitNextFileNumberFromDisk() {
             }
         }
     }
-    next_file_number_ = max_id;
+    manifest_state_.next_file_number = max_id;
+    // next_file_number_ = max_id;
 }
 bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
     for (size_t i = levels_[1].size(); i-- > 0;) {
@@ -381,7 +383,9 @@ bool DBImpl::LoadManifestState() {
         uint32_t wal_count = 0;
 
         if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+        if (magic != kManifestMagic) return false;
         if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+        if (version != kManifestVersion) return false;
         if (!ifs.read(reinterpret_cast<char*>(&next_file_number), sizeof(next_file_number))) return false;
         if (!ifs.read(reinterpret_cast<char*>(&sst_count), sizeof(sst_count))) return false;
 
