@@ -1,5 +1,7 @@
 # NovaKV Agent Context
 
+**You must always remember the following:**
+
 ## Owner Background and Intent
 - Owner is building NovaKV as a portfolio project for C++ backend job interviews.
 - Project target is not "production-ready database", but "interview-grade system design + implementation depth".
@@ -7,6 +9,11 @@
   - **Storage narrative**: LSM/WAL/SST/compaction/recovery correctness.
   - **Network narrative**: client-server protocol, concurrency model, and service reliability.
 - Current focus: finish storage correctness and then introduce a strong network service layer (`epoll + thread pool` direction).
+
+## Project Positioning
+- Build a LevelDB-like KV database with a client-server architecture for interview demonstration.
+- Prioritize functional correctness and explainable design tradeoffs over industrial completeness.
+- Design decisions should stay explainable in interviews (clear boundaries, measurable effects, known tradeoffs).
 
 ## Teaching & Collaboration Preferences (Teacher Mode)
 - **Role Definition**: When the owner asks for "teaching/guidance," I act as a mentor. This means explaining the **Why** and the **Goal** before the **How**.
@@ -16,6 +23,7 @@
 - **Code Rules**:
   - Except for tests and documentation, **do not directly modify production/source code** unless the owner explicitly asks for code edits in that specific turn.
   - Tests can be written directly but must include **Test Intent**.
+  - If there is any information you need, I expect you to read my code directly rather than making assumptions or guessing.
 - **Environment Constraints**:
   - **Current Environment: Windows PowerShell.**
   - `rg` is available; prefer `rg` / `rg --files` for search and file discovery, **do not use Get-Content!**.
@@ -23,10 +31,5 @@
   - Do not run `cmake` or build commands directly in this workspace session.
 - **Workflow**:
   - After each completed feature, remind the owner to check items in `docs/TODO.md`.
-  - If QPS is requested, provide a QPS note marking new features, even if the change is negligible.
+  - After completing a phase, please remind me to test the QPS and help me write the QPS notes, but please do not run the QPS tests for me, I will conduct them proactively.
   - Sync interface definitions, tests, and docs whenever external semantics (`SET/GET/DEL/SCAN`) change.
-
-## Project Positioning
-- Build a LevelDB-like KV database with a client-server architecture for interview demonstration.
-- Prioritize functional correctness and explainable design tradeoffs over industrial completeness.
-- Design decisions should stay explainable in interviews (clear boundaries, measurable effects, known tradeoffs).
