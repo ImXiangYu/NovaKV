@@ -51,6 +51,7 @@ DBImpl::DBImpl(std::string db_path)
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
     const uint64_t new_wal_id = AllocateFileNumber();
+    active_wal_id_ = new_wal_id;
     const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
     manifest_state_.live_wals.insert(new_wal_id);
@@ -277,13 +278,22 @@ void DBImpl::CompactL0ToL1() {
         return;
     }
 
-    std::string new_sst_path = db_path_ + "/" + std::to_string(AllocateFileNumber()) + ".sst";
+    const uint64_t new_sst_id = AllocateFileNumber();
+    std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
+
+    // 先记录本轮输入（当前你是“吃掉全部 L0”，可先取 manifest 里 level=0 的 id）
+    std::vector<uint64_t> l0_input_ids;
+    for (const auto& [id, level] : manifest_state_.sst_levels) {
+        if (level == 0) l0_input_ids.push_back(id);
+    }
 
     WritableFile file(new_sst_path);
     SSTableBuilder builder(&file);
 
     // 确认需要输出sst
     bool has_output = false;
+    // 是否有需要记录的Manifest
+    bool commit_ok = false;
     for (const auto&[key, record] : mp) {
         if (record.type == ValueType::kValue) {
             builder.Add(key, record.value, ValueType::kValue);
@@ -306,10 +316,21 @@ void DBImpl::CompactL0ToL1() {
             LOG_INFO(std::string("SSTable created: ") + new_sst_path);
             // 暂不做 L1 合并，后续会引入更低层压实
             levels_[1].push_back(reader);
+            manifest_state_.sst_levels[new_sst_id] = 1;
+            commit_ok = true;
         }
     } else {
         // 没输出就删除
         fs::remove(new_sst_path);
+        commit_ok = true;
+    }
+
+    if (commit_ok) {
+        for (uint64_t id : l0_input_ids) {
+            manifest_state_.sst_levels.erase(id); // 删除输入
+            fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
+        }
+        PersistManifestState();
     }
 
     for (auto reader : levels_[0]) {
