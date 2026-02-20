@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "DBImpl.h"
+#include "WalHandler.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -259,4 +260,30 @@ TEST_F(DBImplTest, KeepLevelMappingAfterRestart) {
     EXPECT_EQ(recovered_total, sst_on_disk);     // 不应重复加载同一批 SST
     EXPECT_GT(db_recovered.LevelSize(1), 0u);    // 不应把所有 SST 都恢复到 L0
     EXPECT_LT(db_recovered.LevelSize(0), sst_on_disk);
+}
+
+// 11. Phase 2: 多 WAL 恢复应回放全部日志，且按文件号从小到大应用
+TEST_F(DBImplTest, MultiWalRecoveryReplaysAllLogsInFileNumberOrder) {
+    const std::string wal_2 = test_db_path + "/2.wal";
+    const std::string wal_10 = test_db_path + "/10.wal";
+
+    {
+        WalHandler wal(wal_2);
+        wal.AddLog("order_key", "from_2", ValueType::kValue);
+        wal.AddLog("tomb_key", "alive", ValueType::kValue);
+    }
+    {
+        WalHandler wal(wal_10);
+        wal.AddLog("order_key", "from_10", ValueType::kValue);
+        wal.AddLog("tomb_key", "", ValueType::kDeletion);
+    }
+
+    ASSERT_EQ(CountNumericFilesWithExt(test_db_path, ".wal"), 2u);
+
+    DBImpl db_recovered(test_db_path);
+
+    std::string val;
+    EXPECT_TRUE(GetValue(db_recovered, "order_key", val));
+    EXPECT_EQ(val, "from_10");
+    EXPECT_FALSE(GetValue(db_recovered, "tomb_key", val));
 }
