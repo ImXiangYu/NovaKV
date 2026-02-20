@@ -15,11 +15,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-struct LiveSSTMeta {
-    uint64_t file_number;
-    uint32_t level;
-};
-
 constexpr uint32_t kManifestMagic = 0x12345678; // 自定义
 constexpr uint32_t kManifestVersion = 1;
 } // 匿名
@@ -156,42 +151,35 @@ void DBImpl::MinorCompaction() {
 void DBImpl::RecoverFromWals() {
     LOG_INFO(std::string("Recover from wals start."));
 
-    // 如果state非空，走manifest逻辑
-    if (!manifest_state_.live_wals.empty()) {
-        std::vector entries(manifest_state_.live_wals.begin(), manifest_state_.live_wals.end());
-        std::sort(entries.begin(), entries.end());
-        // 对每个WAL，临时创建一个WalHandler并LoadLog
-        for (const auto& id : entries) {
-            std::string wal_path = db_path_ + "/" + std::to_string(id) + ".wal";
-            WalHandler handler(wal_path);
-            handler.LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
-                mem_->ApplyWithoutWal(k, {type, v});
-            });
+    // 兜底扫描目录，把旧目录中的 WAL 补录进 manifest_state_
+    bool manifest_changed = false;
+    for (auto& entry : fs::directory_iterator(db_path_)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".wal") {
+            continue;
+        }
+        const std::string stem = entry.path().stem().string();
+        if (!std::all_of(stem.begin(), stem.end(),
+                         [](const unsigned char c) { return std::isdigit(c); })) {
+            continue;
+        }
+        if (const uint64_t id = std::stoull(stem); manifest_state_.live_wals.insert(id).second) {
+            manifest_changed = true;
         }
     }
-    // 扫描目录找出所有 .wal（数字文件名）。
-    std::vector<int> wals;
-    for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
-        // 如果每一条的扩展名是.wal，就记录下来
-        if (entry.is_regular_file()) {
-            if (entry.path().extension() == ".wal") {
-                std::string stem = entry.path().stem().string();
-                // 如果不是全数字就跳过
-                if (!std::all_of(stem.begin(), stem.end(),
-                                 [](const unsigned char c) { return std::isdigit(c); })) {
-                    continue;
-                                 }
-                int id = std::stoi(stem);
-                wals.push_back(id);
-            }
-        }
+    if (manifest_changed) {
+        PersistManifestState();
     }
-    // 按文件号升序排列
-    std::sort(wals.begin(), wals.end());
 
-    // 对每个WAL，临时创建一个WalHandler并LoadLog
-    for (int id : wals) {
-        std::string wal_path = db_path_ + "/" + std::to_string(id) + ".wal";
+    std::vector replay_ids(
+        manifest_state_.live_wals.begin(), manifest_state_.live_wals.end());
+    std::sort(replay_ids.begin(), replay_ids.end());
+
+    for (const uint64_t id : replay_ids) {
+        const std::string wal_path = db_path_ + "/" + std::to_string(id) + ".wal";
+        if (!fs::exists(wal_path)) {
+            LOG_WARN(std::string("Manifest WAL missing on disk: ") + wal_path);
+            continue;
+        }
         WalHandler handler(wal_path);
         handler.LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
             mem_->ApplyWithoutWal(k, {type, v});
