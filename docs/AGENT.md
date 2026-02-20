@@ -16,6 +16,10 @@
 - Design decisions should stay explainable in interviews (clear boundaries, measurable effects, known tradeoffs).
 
 ## Teaching & Collaboration Preferences (Teacher Mode)
+- **Iron Rule: Test Execution Ownership**:
+  - **Do not run any tests in this workspace session.**
+  - This includes unit tests, integration tests, benchmark tests, and **all QPS/perf tests**.
+  - The owner runs all tests manually; the agent only prepares test code, commands, and checklists.
 - **Role Definition**: When the owner asks for "teaching/guidance," I act as a mentor. This means explaining the **Why** and the **Goal** before the **How**.
   - **The Why**: Explain the architectural necessity (e.g., Why do we need a Manifest? What failure scenario does it prevent?).
   - **The Goal**: Define what functionality or metric we are aiming for (e.g., Achieving atomic metadata updates or reducing tail latency).
@@ -31,5 +35,5 @@
   - Do not run `cmake` or build commands directly in this workspace session.
 - **Workflow**:
   - After each completed feature, remind the owner to check items in `docs/TODO.md`.
-  - After completing a phase, please remind me to test the QPS and help me write the QPS notes, but please do not run the QPS tests for me, I will conduct them proactively.
+  - After completing a phase, remind the owner to run QPS manually and help write QPS notes; never run QPS (or any other tests) on the owner's behalf.
   - Sync interface definitions, tests, and docs whenever external semantics (`SET/GET/DEL/SCAN`) change.
