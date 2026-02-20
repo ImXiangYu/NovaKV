@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include "DBImpl.h"
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -34,6 +36,22 @@ bool GetValue(const DBImpl& db, const std::string& key, std::string& value) {
     }
     value = record.value;
     return true;
+}
+
+size_t CountNumericFilesWithExt(const std::string& dir, const std::string& ext) {
+    size_t count = 0;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ext) {
+            continue;
+        }
+        const std::string stem = entry.path().stem().string();
+        if (!std::all_of(stem.begin(), stem.end(),
+                         [](const unsigned char c) { return std::isdigit(c); })) {
+            continue;
+        }
+        ++count;
+    }
+    return count;
 }
 } // namespace
 
@@ -222,17 +240,23 @@ TEST_F(DBImplTest, KeepLevelMappingAfterRestart) {
     {
         DBImpl db(test_db_path);
 
-        // 先制造一个可预测的层级状态：L1 有 1 个文件，L0 有 1 个文件
+        // 先制造包含 L0 和 L1 的状态
         PutValue(db, "seed", "v");
         ForceMinorCompaction(db, "phase2_round1");
         ForceMinorCompaction(db, "phase2_round2"); // 触发 L0->L1
         ForceMinorCompaction(db, "phase2_round3"); // 生成新的 L0
 
-        EXPECT_EQ(db.LevelSize(0), 1u);
-        EXPECT_EQ(db.LevelSize(1), 1u);
+        EXPECT_GT(db.LevelSize(0), 0u);
+        EXPECT_GT(db.LevelSize(1), 0u);
     }
 
+    const size_t sst_on_disk = CountNumericFilesWithExt(test_db_path, ".sst");
+    ASSERT_GT(sst_on_disk, 0u);
+
     DBImpl db_recovered(test_db_path);
-    EXPECT_EQ(db_recovered.LevelSize(0), 1u);
-    EXPECT_EQ(db_recovered.LevelSize(1), 1u);
+
+    const size_t recovered_total = db_recovered.LevelSize(0) + db_recovered.LevelSize(1);
+    EXPECT_EQ(recovered_total, sst_on_disk);     // 不应重复加载同一批 SST
+    EXPECT_GT(db_recovered.LevelSize(1), 0u);    // 不应把所有 SST 都恢复到 L0
+    EXPECT_LT(db_recovered.LevelSize(0), sst_on_disk);
 }

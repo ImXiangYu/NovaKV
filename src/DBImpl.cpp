@@ -221,6 +221,9 @@ void DBImpl::LoadSSTables() {
                 LOG_ERROR("Failed to open manifest SST: " + path);
             }
         }
+        // 成功后直接return
+        LOG_INFO(std::string("LoadSSTables completed"));
+        return ;
     }
 
     // 保留扫目录分支
@@ -249,7 +252,6 @@ void DBImpl::LoadSSTables() {
     if (!manifest_state_.sst_levels.empty()) {
         PersistManifestState(); // 完成一次迁移落盘
     }
-
 
     LOG_INFO(std::string("LoadSSTables completed"));
 }
