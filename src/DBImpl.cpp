@@ -187,31 +187,68 @@ void DBImpl::RecoverFromWals() const {
 }
 void DBImpl::LoadSSTables() {
     LOG_INFO(std::string("LoadSSTables start"));
-    std::vector<std::pair<int, std::string>> sstables;
-    for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
-        // 如果每一条的扩展名是.sst，就记录下来
-        if (entry.is_regular_file()) {
-            if (entry.path().extension() == ".sst") {
-                std::string stem = entry.path().stem().string();
-                // 如果不是全数字就跳过
-                if (!std::all_of(stem.begin(), stem.end(),
-                                 [](const unsigned char c) { return std::isdigit(c); })) {
-                    continue;
-                }
-                int id = std::stoi(stem);
-                sstables.emplace_back(id, entry.path().string());
+
+    // 通过manifest获取
+    // 先清空levels_
+    for (auto& lv : levels_) {
+        for (const auto* r : lv) delete r;
+        lv.clear();
+    }
+
+    if (!manifest_state_.sst_levels.empty()) {
+        std::vector<std::pair<uint64_t, uint32_t>> entries(
+    manifest_state_.sst_levels.begin(), manifest_state_.sst_levels.end());
+        std::sort(entries.begin(), entries.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        for (const auto& [id, level] : entries) {
+            if (level >= levels_.size()) {
+                LOG_ERROR("Manifest level out of range: " + std::to_string(level));
+                continue;
+            }
+
+            const std::string path = db_path_ + "/" + std::to_string(id) + ".sst";
+            if (!fs::exists(path)) {
+                LOG_ERROR("Manifest SST missing: " + path);
+                continue;
+            }
+
+            if (SSTableReader* reader = SSTableReader::Open(path)) {
+                levels_[level].push_back(reader);
+            } else {
+                LOG_ERROR("Failed to open manifest SST: " + path);
             }
         }
     }
+
+    // 保留扫目录分支
+    std::vector<std::pair<int, std::string>> sstables;
+    for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
+        // 如果每一条的扩展名是.sst，就记录下来
+        if (!entry.is_regular_file() || entry.path().extension() != ".sst") continue;
+        const std::string stem = entry.path().stem().string();
+        if (!std::all_of(stem.begin(), stem.end(),
+                         [](unsigned char c){ return std::isdigit(c); })) {
+            continue;
+                         }
+        const uint64_t id = std::stoull(stem);
+        sstables.emplace_back(id, entry.path().string());
+    }
     // 之后把sstables从小到大排序，排序后重新Open加到levels_[0]即可
     std::sort(sstables.begin(), sstables.end());
-    for (const auto & sstable : sstables) {
-        if (SSTableReader* reader = SSTableReader::Open(sstable.second)) {
-            LOG_INFO(std::string("SSTable recovery: ") + sstable.second);
-            // 加回levels_[0]
-            levels_[0].push_back(reader);
+
+    for (const auto& [id, path] : sstables) {
+        if (SSTableReader* reader = SSTableReader::Open(path)) {
+            levels_[0].push_back(reader);              // 旧逻辑兜底：先归到 L0
+            manifest_state_.sst_levels[id] = 0;        // 迁移写回Manifest
         }
     }
+
+    if (!manifest_state_.sst_levels.empty()) {
+        PersistManifestState(); // 完成一次迁移落盘
+    }
+
+
     LOG_INFO(std::string("LoadSSTables completed"));
 }
 
