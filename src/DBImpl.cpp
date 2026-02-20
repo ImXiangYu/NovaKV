@@ -155,6 +155,20 @@ void DBImpl::MinorCompaction() {
 
 void DBImpl::RecoverFromWals() const {
     LOG_INFO(std::string("Recover from wals start."));
+
+    // 如果state非空，走manifest逻辑
+    if (!manifest_state_.live_wals.empty()) {
+        std::vector entries(manifest_state_.live_wals.begin(), manifest_state_.live_wals.end());
+        std::sort(entries.begin(), entries.end());
+        // 对每个WAL，临时创建一个WalHandler并LoadLog
+        for (const auto& id : entries) {
+            std::string wal_path = db_path_ + "/" + std::to_string(id) + ".wal";
+            WalHandler handler(wal_path);
+            handler.LoadLog([this](ValueType type, const std::string& k, const std::string& v) {
+                mem_->ApplyWithoutWal(k, {type, v});
+            });
+        }
+    }
     // 扫描目录找出所有 .wal（数字文件名）。
     std::vector<int> wals;
     for (auto& entry : std::filesystem::directory_iterator(db_path_)) {
