@@ -269,15 +269,6 @@ void DBImpl::CompactL0ToL1() {
         });
     }
 
-    // 合并前先判空
-    if (mp.empty()) {
-        for (auto reader : levels_[0]) {
-            delete reader;
-        }
-        levels_[0].clear();
-        return;
-    }
-
     const uint64_t new_sst_id = AllocateFileNumber();
     std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
 
@@ -285,6 +276,22 @@ void DBImpl::CompactL0ToL1() {
     std::vector<uint64_t> l0_input_ids;
     for (const auto& [id, level] : manifest_state_.sst_levels) {
         if (level == 0) l0_input_ids.push_back(id);
+    }
+
+    auto consume_l0 = [&]() {
+        for (uint64_t id : l0_input_ids) {
+            manifest_state_.sst_levels.erase(id);
+            fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
+        }
+        for (auto* r : levels_[0]) delete r;
+        levels_[0].clear();
+    };
+
+    // mp 为空：无输出，但输入已被消费
+    if (mp.empty()) {
+        consume_l0();
+        PersistManifestState();
+        return;
     }
 
     WritableFile file(new_sst_path);
@@ -318,6 +325,10 @@ void DBImpl::CompactL0ToL1() {
             levels_[1].push_back(reader);
             manifest_state_.sst_levels[new_sst_id] = 1;
             commit_ok = true;
+        } else {
+            // 如果打开失败直接return，不走后续逻辑
+            fs::remove(new_sst_path);
+            return;
         }
     } else {
         // 没输出就删除
@@ -331,6 +342,8 @@ void DBImpl::CompactL0ToL1() {
             fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
         }
         PersistManifestState();
+    } else {
+        return ;
     }
 
     for (auto reader : levels_[0]) {
