@@ -35,7 +35,7 @@ class DBImpl {
 
     private:
         void MinorCompaction();
-        void RecoverFromWals() const; // 关键：启动时自动恢复逻辑
+        void RecoverFromWals(); // 关键：启动时自动恢复逻辑
         void LoadSSTables();
 
         // 管理next_file_number_

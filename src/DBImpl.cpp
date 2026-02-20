@@ -153,7 +153,7 @@ void DBImpl::MinorCompaction() {
     imm_ = nullptr;
 }
 
-void DBImpl::RecoverFromWals() const {
+void DBImpl::RecoverFromWals() {
     LOG_INFO(std::string("Recover from wals start."));
 
     // 如果state非空，走manifest逻辑
