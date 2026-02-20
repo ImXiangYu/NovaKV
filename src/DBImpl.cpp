@@ -269,9 +269,6 @@ void DBImpl::CompactL0ToL1() {
         });
     }
 
-    const uint64_t new_sst_id = AllocateFileNumber();
-    std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
-
     // 先记录本轮输入（当前你是“吃掉全部 L0”，可先取 manifest 里 level=0 的 id）
     std::vector<uint64_t> l0_input_ids;
     for (const auto& [id, level] : manifest_state_.sst_levels) {
@@ -279,12 +276,15 @@ void DBImpl::CompactL0ToL1() {
     }
 
     auto consume_l0 = [&]() {
+        for (const auto* r : levels_[0]) {
+            delete r;
+        }
+        levels_[0].clear();
+
         for (uint64_t id : l0_input_ids) {
             manifest_state_.sst_levels.erase(id);
             fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
         }
-        for (auto* r : levels_[0]) delete r;
-        levels_[0].clear();
     };
 
     // mp 为空：无输出，但输入已被消费
@@ -294,13 +294,14 @@ void DBImpl::CompactL0ToL1() {
         return;
     }
 
+    const uint64_t new_sst_id = AllocateFileNumber();
+    std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
+
     WritableFile file(new_sst_path);
     SSTableBuilder builder(&file);
 
     // 确认需要输出sst
     bool has_output = false;
-    // 是否有需要记录的Manifest
-    bool commit_ok = false;
     for (const auto&[key, record] : mp) {
         if (record.type == ValueType::kValue) {
             builder.Add(key, record.value, ValueType::kValue);
@@ -318,38 +319,27 @@ void DBImpl::CompactL0ToL1() {
     builder.Finish();
     file.Flush();
 
-    if (has_output) {
-        if (SSTableReader* reader = SSTableReader::Open(new_sst_path)) {
-            LOG_INFO(std::string("SSTable created: ") + new_sst_path);
-            // 暂不做 L1 合并，后续会引入更低层压实
-            levels_[1].push_back(reader);
-            manifest_state_.sst_levels[new_sst_id] = 1;
-            commit_ok = true;
-        } else {
-            // 如果打开失败直接return，不走后续逻辑
-            fs::remove(new_sst_path);
-            return;
-        }
-    } else {
+    if (!has_output) {
         // 没输出就删除
         fs::remove(new_sst_path);
-        commit_ok = true;
-    }
-
-    if (commit_ok) {
-        for (uint64_t id : l0_input_ids) {
-            manifest_state_.sst_levels.erase(id); // 删除输入
-            fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
-        }
+        consume_l0();
         PersistManifestState();
-    } else {
-        return ;
+        return;
     }
 
-    for (auto reader : levels_[0]) {
-        delete reader;
+    if (SSTableReader* reader = SSTableReader::Open(new_sst_path)) {
+        LOG_INFO(std::string("SSTable created: ") + new_sst_path);
+        // 暂不做 L1 合并，后续会引入更低层压实
+        levels_[1].push_back(reader);
+        manifest_state_.sst_levels[new_sst_id] = 1;
+        consume_l0();
+        PersistManifestState();
+        return;
     }
-    levels_[0].clear();
+
+    // 打开新 SST 失败：不消费旧 L0，保持当前进程可见数据
+    LOG_ERROR(std::string("Failed to open SSTable: ") + new_sst_path);
+    fs::remove(new_sst_path);
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {
