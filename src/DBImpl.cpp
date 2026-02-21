@@ -315,7 +315,7 @@ bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
         DelSST: u64 file_number
         AddWAL/DelWAL: u64 wal_id
 */
-bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
+bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) const {
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
         return false;

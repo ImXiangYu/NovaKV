@@ -49,7 +49,7 @@ class DBImpl {
         bool HasVisibleValueInL1(const std::string& key) const;
 
         // Manifest 日志
-        bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
+        bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0) const;
 
         struct ManifestState {
             uint64_t next_file_number = 0;
