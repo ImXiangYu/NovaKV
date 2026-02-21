@@ -130,6 +130,9 @@ void DBImpl::MinorCompaction() {
         }
 
         manifest_state_.sst_levels[new_sst_id] = 0;
+        if (const bool ok = AppendManifestEdit(ManifestOp::AddSST, new_sst_id, 0); !ok) {
+            LOG_ERROR("append manifest edit failed.");
+        }
         // 删除旧 WAL 文件
         if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
             manifest_state_.live_wals.erase(old_wal_id);
@@ -298,7 +301,6 @@ void DBImpl::InitNextFileNumberFromDisk() {
         }
     }
     manifest_state_.next_file_number = max_id;
-    // next_file_number_ = max_id;
 }
 bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
     for (size_t i = levels_[1].size(); i-- > 0;) {
@@ -384,7 +386,7 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) cons
         // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
         ofs.close();
     } else {
-        LOG_ERROR("Failed to open MANIFEST.log.tmp for writing");
+        LOG_ERROR("Failed to open MANIFEST.log for writing");
         return false;
     }
     return true;
@@ -466,6 +468,9 @@ void DBImpl::CompactL0ToL1() {
         // 暂不做 L1 合并，后续会引入更低层压实
         levels_[1].push_back(reader);
         manifest_state_.sst_levels[new_sst_id] = 1;
+        if (const bool ok = AppendManifestEdit(ManifestOp::AddSST, new_sst_id, 1); !ok) {
+            LOG_ERROR("append manifest edit failed, fallback to snapshot");
+        }
         consume_l0();
         PersistManifestState();
         return;
