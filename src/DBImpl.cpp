@@ -17,6 +17,7 @@ namespace fs = std::filesystem;
 namespace {
 constexpr uint32_t kManifestMagic = 0x12345678; // 自定义
 constexpr uint32_t kManifestVersion = 1;
+constexpr uint32_t kManifestCheckpointThreshold = 100;
 } // 匿名
 
 DBImpl::DBImpl(std::string db_path)
@@ -54,10 +55,7 @@ DBImpl::DBImpl(std::string db_path)
     const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
     manifest_state_.live_wals.insert(new_wal_id);
-    if (const bool ok = AppendManifestEdit(ManifestOp::AddWAL, new_wal_id); !ok) {
-        LOG_ERROR("append manifest edit failed, fallback to snapshot");
-        PersistManifestState(); // 兜底
-    }
+    RecordManifestEdit(ManifestOp::AddWAL, new_wal_id);
 
     // 恢复WAL
     RecoverFromWals();
@@ -102,10 +100,7 @@ void DBImpl::MinorCompaction() {
     mem_ = new MemTable(new_wal);
 
     manifest_state_.live_wals.insert(new_wal_id);
-    if (const bool ok = AppendManifestEdit(ManifestOp::AddWAL, new_wal_id); !ok) {
-        LOG_ERROR("append manifest edit failed, fallback to snapshot");
-        PersistManifestState(); // 兜底
-    }
+    RecordManifestEdit(ManifestOp::AddWAL, new_wal_id);
 
     // 3. 将 imm_ 落盘为 SSTable
     uint64_t new_sst_id = AllocateFileNumber();
@@ -129,20 +124,16 @@ void DBImpl::MinorCompaction() {
     if (SSTableReader* level = SSTableReader::Open(sst_path)) {
         // 记得加锁，防止 Get 操作同时遍历 levels[0]
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard lock(mutex_);
             levels_[0].push_back(level);
         }
 
         manifest_state_.sst_levels[new_sst_id] = 0;
-        if (const bool ok = AppendManifestEdit(ManifestOp::AddSST, new_sst_id, 0); !ok) {
-            LOG_ERROR("append manifest edit failed.");
-        }
+        RecordManifestEdit(ManifestOp::AddSST, new_sst_id, 0);
         // 删除旧 WAL 文件
         if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
             manifest_state_.live_wals.erase(old_wal_id);
-            if (const bool ok = AppendManifestEdit(ManifestOp::DelWAL, old_wal_id); !ok) {
-                LOG_ERROR("append manifest edit failed.");
-            }
+            RecordManifestEdit(ManifestOp::DelWAL, old_wal_id);
             LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
         } else {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
@@ -179,9 +170,7 @@ void DBImpl::RecoverFromWals() {
             continue;
         }
         if (const uint64_t id = std::stoull(stem); manifest_state_.live_wals.insert(id).second) {
-            if (const bool ok = AppendManifestEdit(ManifestOp::AddWAL, id); !ok) {
-                LOG_ERROR("append manifest edit failed");
-            }
+            RecordManifestEdit(ManifestOp::AddWAL, id);
             manifest_changed = true;
         }
     }
@@ -277,12 +266,7 @@ void DBImpl::LoadSSTables() {
 
 uint64_t DBImpl::AllocateFileNumber() {
     ++manifest_state_.next_file_number;
-    const bool ok = AppendManifestEdit(ManifestOp::SetNextFileNumber,
-                                   manifest_state_.next_file_number);
-    if (!ok) {
-        LOG_ERROR("Append manifest edit failed, fallback to snapshot");
-        PersistManifestState(); // 兜底
-    }
+    RecordManifestEdit(ManifestOp::SetNextFileNumber, manifest_state_.next_file_number);
     return manifest_state_.next_file_number;
 }
 
@@ -410,6 +394,10 @@ bool DBImpl::ReplayManifestLog() {
 
     const fs::path p = fs::path(db_path_) / "MANIFEST.log";
 
+    if (!fs::exists(p)) {
+        return true; // 无增量日志，正常
+    }
+
     // 读取出路径后开始解析
     if (std::ifstream ifs(p, std::ios::binary); ifs) {
         while (true) {
@@ -422,7 +410,7 @@ bool DBImpl::ReplayManifestLog() {
             // 校验 Magic，如果 Magic 错误，说明接下来的数据已损坏
             if (magic != kManifestMagic) {
                 LOG_ERROR("Manifest record magic mismatch, possible corruption. Stopping replay.");
-                break;
+                return false;
             }
 
             // 准备读取字段
@@ -490,6 +478,9 @@ bool DBImpl::ReplayManifestLog() {
                 return false;
             }
         }
+    } else {
+        LOG_ERROR("MANIFEST.log exists but cannot be opened");
+        return false;
     }
     return true;
 }
@@ -527,6 +518,51 @@ bool DBImpl::ApplyManifestEdit(const ManifestOp op, const uint64_t id, const uin
     return true;
 }
 
+/*
+ * 日志主写 + 失败回退
+ */
+void DBImpl::RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
+    if (!AppendManifestEdit(op, id, level)) {
+        LOG_ERROR("append manifest edit failed, fallback to snapshot");
+        PersistManifestState();
+        return;
+    }
+    ++manifest_edits_since_checkpoint_;
+    MaybeCheckpointManifest();
+}
+
+/*
+ * 检查更新 MANIFEST.log 到 MANIFEST 快照
+ */
+void DBImpl::MaybeCheckpointManifest() {
+    if (manifest_edits_since_checkpoint_ >= kManifestCheckpointThreshold) {
+        // 先保存快照
+        PersistManifestState();
+        // 再清空log
+        TruncateManifestLog();
+        // 最后重置数量
+        manifest_edits_since_checkpoint_ = 0;
+        LOG_INFO("Manifest log is written to the snapshot");
+    }
+    // 不满足就什么也不做
+}
+
+/*
+ * 暂时作用: 清空MANIFEST.log
+ */
+void DBImpl::TruncateManifestLog() {
+    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
+        LOG_ERROR("DB Path error: " + db_path_);
+        return ;
+    }
+    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
+    if (!fs::exists(p)) {
+        LOG_ERROR("MANIFEST.log does not exist");
+        return ;
+    }
+    std::ofstream ofs(p, std::ios::trunc);
+}
+
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
     if (levels_[0].empty()) return;
@@ -552,9 +588,7 @@ void DBImpl::CompactL0ToL1() {
 
         for (uint64_t id : l0_input_ids) {
             manifest_state_.sst_levels.erase(id);
-            if (const bool ok = AppendManifestEdit(ManifestOp::DelSST, id, 0); !ok) {
-                LOG_ERROR("Append manifest edit failed.");
-            }
+            RecordManifestEdit(ManifestOp::DelSST, id, 0);
             fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
         }
     };
@@ -604,9 +638,7 @@ void DBImpl::CompactL0ToL1() {
         // 暂不做 L1 合并，后续会引入更低层压实
         levels_[1].push_back(reader);
         manifest_state_.sst_levels[new_sst_id] = 1;
-        if (const bool ok = AppendManifestEdit(ManifestOp::AddSST, new_sst_id, 1); !ok) {
-            LOG_ERROR("append manifest edit failed, fallback to snapshot");
-        }
+        RecordManifestEdit(ManifestOp::AddSST, new_sst_id, 1);
         consume_l0();
         PersistManifestState();
         return;

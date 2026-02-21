@@ -53,6 +53,14 @@ class DBImpl {
         bool ReplayManifestLog();
         bool ApplyManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
 
+        // Manifest 日志->快照
+        void RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
+        void MaybeCheckpointManifest();
+        void TruncateManifestLog();
+
+        // manifest log 记录数
+        uint32_t manifest_edits_since_checkpoint_ = 0;
+
         struct ManifestState {
             uint64_t next_file_number = 0;
             std::unordered_map<uint64_t, uint32_t> sst_levels; // file_number -> level
