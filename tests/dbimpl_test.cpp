@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -286,4 +287,28 @@ TEST_F(DBImplTest, MultiWalRecoveryReplaysAllLogsInFileNumberOrder) {
     EXPECT_TRUE(GetValue(db_recovered, "order_key", val));
     EXPECT_EQ(val, "from_10");
     EXPECT_FALSE(GetValue(db_recovered, "tomb_key", val));
+}
+
+// 12. Phase 2: 日志主写达到阈值后应触发 checkpoint，并将 MANIFEST.log 截断
+// Test Intent: 验证“日志主写 + 周期快照”链路在阈值点会落快照并清空增量日志。
+TEST_F(DBImplTest, ManifestCheckpointTruncatesLogAtThreshold) {
+    constexpr int kSeedWalFiles = 98; // 构造阶段会额外产生 2 条 edit，总计 100 次
+    for (int i = 1; i <= kSeedWalFiles; ++i) {
+        const std::string wal_path = test_db_path + "/" + std::to_string(i) + ".wal";
+        std::ofstream ofs(wal_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(ofs.good()) << wal_path;
+    }
+
+    ASSERT_EQ(CountNumericFilesWithExt(test_db_path, ".wal"), static_cast<size_t>(kSeedWalFiles));
+
+    {
+        DBImpl db(test_db_path);
+    }
+
+    const fs::path manifest_path = fs::path(test_db_path) / "MANIFEST";
+    const fs::path manifest_log_path = fs::path(test_db_path) / "MANIFEST.log";
+
+    ASSERT_TRUE(fs::exists(manifest_path));
+    ASSERT_TRUE(fs::exists(manifest_log_path));
+    EXPECT_EQ(fs::file_size(manifest_log_path), 0u);
 }
