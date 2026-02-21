@@ -525,7 +525,9 @@ bool DBImpl::ApplyManifestEdit(const ManifestOp op, const uint64_t id, const uin
 void DBImpl::RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
     if (!AppendManifestEdit(op, id, level)) {
         LOG_ERROR("append manifest edit failed, fallback to snapshot");
-        PersistManifestState();
+        if (!PersistManifestState()) {
+            LOG_ERROR("fallback snapshot failed");
+        }
         return;
     }
     ++manifest_edits_since_checkpoint_;
@@ -536,22 +538,20 @@ void DBImpl::RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
  * 检查更新 MANIFEST.log 到 MANIFEST 快照
  */
 void DBImpl::MaybeCheckpointManifest() {
-    if (manifest_edits_since_checkpoint_ >= kManifestCheckpointThreshold) {
-        // 先保存快照
-        if (PersistManifestState()) {
-            // 再清空log
-            if (TruncateManifestLog()) {
-                // 重置数量
-                manifest_edits_since_checkpoint_ = 0;
-                LOG_INFO("Manifest log is written to the snapshot");
-            } else {
-                LOG_ERROR("Failed to truncate manifest log");
-            }
-        } else {
-            LOG_ERROR("Failed to persist manifest state");
-        }
+    if (manifest_edits_since_checkpoint_ < kManifestCheckpointThreshold) return;
+
+    if (!PersistManifestState()) {
+        LOG_ERROR("checkpoint snapshot failed, keep MANIFEST.log");
+        return; // 不截断，不清计数
     }
-    // 不满足就什么也不做
+
+    if (!TruncateManifestLog()) {
+        LOG_ERROR("checkpoint truncate failed after snapshot");
+        return; // 不清计数，后续再试
+    }
+
+    manifest_edits_since_checkpoint_ = 0;
+    LOG_INFO("Manifest checkpoint completed");
 }
 
 /*
