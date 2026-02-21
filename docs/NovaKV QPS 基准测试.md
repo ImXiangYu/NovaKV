@@ -170,5 +170,24 @@ BenchPut       169363 ns        18284 ns        40288 items_per_second=54.693k/s
 BenchGet         1237 ns         1226 ns       551235 items_per_second=815.88k/s
 ```
 
+引入 Manifest 元数据恢复、追加式版本变更记录与多 WAL 恢复后，主要影响启动恢复路径与元数据维护路径；常态 Put/Get QPS 预期无结构性变化，波动主要来自 checkpoint 触发频率与 compaction 时机。
 
+```
+2026-02-21T18:59:28+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 0.18, 0.08, 0.07
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       194892 ns        18869 ns        40472 items_per_second=52.9984k/s
+BenchGet         1460 ns         1335 ns       499907 items_per_second=748.867k/s
+```
 
