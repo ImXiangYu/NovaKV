@@ -299,6 +299,86 @@ bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
     // 没找到
     return false;
 }
+
+/*
+   参数语义统一为：
+       SetNextFileNumber: id = next_file_number，level 忽略
+       AddSST: id = file_number，level = level
+       DelSST: id = file_number
+       AddWAL/DelWAL: id = wal_id
+   日志记录格式建议固定为：
+       magic(u32) + version(u16) + op(u8) + payload_size(u32)
+       payload 按 op 写入（u64 或 u64+u32）
+    payload:
+        SetNextFileNumber: u64 next_file_number
+        AddSST: u64 file_number + u32 level
+        DelSST: u64 file_number
+        AddWAL/DelWAL: u64 wal_id
+*/
+bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
+    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
+        LOG_ERROR("DB Path error: " + db_path_);
+        return false;
+    }
+
+    // MANIFEST.log
+    const fs::path final_path = fs::path(db_path_) / "MANIFEST.log";
+    const fs::path tmp_path = fs::path(db_path_) / "MANIFEST.log.tmp";
+
+    // 先写入临时文件
+    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc); ofs) {
+        uint32_t payload_size = 0;
+        switch (op) {
+            case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
+            case ManifestOp::AddSST:            payload_size = sizeof(uint64_t) + sizeof(uint32_t); break;
+            case ManifestOp::DelSST:            payload_size = sizeof(uint64_t); break;
+            case ManifestOp::AddWAL:            payload_size = sizeof(uint64_t); break;
+            case ManifestOp::DelWAL:            payload_size = sizeof(uint64_t); break;
+            default: return false;
+        }
+
+        // 写 header（字段分开写，不要直接写 struct，避免 padding）
+        constexpr uint32_t magic = kManifestMagic;
+        constexpr uint32_t version = kManifestVersion;
+        const auto op_u8 = static_cast<uint8_t>(op);
+
+        ofs.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+        ofs.write(reinterpret_cast<const char*>(&version), sizeof(version));
+        ofs.write(reinterpret_cast<const char*>(&op_u8), sizeof(op_u8));
+        ofs.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+        // 写 payload
+        switch (op) {
+            case ManifestOp::SetNextFileNumber:
+            case ManifestOp::DelSST:
+            case ManifestOp::AddWAL:
+            case ManifestOp::DelWAL:
+                ofs.write(reinterpret_cast<const char*>(&id), sizeof(id));
+                break;
+            case ManifestOp::AddSST:
+                ofs.write(reinterpret_cast<const char*>(&id), sizeof(id));       // file_number
+                ofs.write(reinterpret_cast<const char*>(&level), sizeof(level)); // level
+                break;
+            default:
+                return false;
+        }
+
+        ofs.flush(); // 确保操作系统缓冲区已接收数据
+        if (!ofs) {
+            LOG_ERROR("Failed to write MANIFEST.log content");
+            return false;
+        }
+        // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
+        ofs.close();
+    } else {
+        LOG_ERROR("Failed to open MANIFEST.log.tmp for writing");
+        return false;
+    }
+
+    // 原子替换：将 tmp 重命名为正式文件
+    fs::rename(tmp_path, final_path);
+    return true;
+}
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
     if (levels_[0].empty()) return;

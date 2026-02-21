@@ -14,7 +14,9 @@
 #include <unordered_set>
 #include <unordered_map>
 
-
+enum class ManifestOp : uint8_t {
+    SetNextFileNumber=1, AddSST=2, DelSST=3, AddWAL=4, DelWAL=5
+};
 
 class DBImpl {
     public:
@@ -45,6 +47,9 @@ class DBImpl {
 
         // 辅助检查
         bool HasVisibleValueInL1(const std::string& key) const;
+
+        // Manifest 日志
+        bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
 
         struct ManifestState {
             uint64_t next_file_number = 0;
