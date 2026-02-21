@@ -41,6 +41,20 @@
   - [x] 成功落盘后删除对应旧 WAL
   - [x] 多 WAL 恢复专项测试
 
+## Phase 2.5 - DBImpl 重构（进入并发前）
+- [ ] 目标：降低 `DBImpl` 复杂度，先做“行为不变重构”
+- [ ] 拆分职责（按顺序）
+  - [ ] 提取 `ManifestManager`：Manifest 的 load/persist/append/replay/checkpoint
+  - [ ] 提取 `RecoveryLoader`：WAL 回放、SST 加载、`next_file_number` 初始化
+  - [ ] 提取 `CompactionEngine`：`MinorCompaction` 与 `L0->L1` compaction
+- [ ] `DBImpl` 收口
+  - [ ] `DBImpl` 只保留对外 API 与调度（`Put/Get/NewIterator`）
+  - [ ] 锁与线程入口统一放在 `DBImpl`，避免分散在多个模块
+- [ ] 重构约束（必须满足）
+  - [ ] 不改变 `SET/GET/DEL/SCAN` 对外语义
+  - [ ] 不改变现有 WAL/SST/Manifest 文件格式
+  - [ ] 每拆一块就同步更新对应文档与 TODO 勾选
+
 ## Phase 3 - 并发与后台任务（为网络化做准备）
 - [ ] 明确 DB 并发策略
   - [ ] 写串行 + 多读并发边界文档化
@@ -111,7 +125,7 @@
   - [ ] 并发压测与关键指标展示
 
 ## Milestone（验收线）
-- [ ] M1：完成 Phase 1-3（存储正确性 + 恢复 + 基础并发）
+- [ ] M1：完成 Phase 1-3（含 Phase 2.5，存储正确性 + 恢复 + 基础并发）
 - [ ] M2：完成 Phase 6-7（可稳定运行的网络服务）
 - [ ] M3：完成 Phase 8-9（有数据、有文档、可演示）
 
