@@ -41,7 +41,9 @@ DBImpl::DBImpl(std::string db_path)
     }
 
     // 回放Log更新manifest_state_
-    ReplayManifestLog();
+    if (!ReplayManifestLog()) {
+        LOG_ERROR("replay manifest log failed");
+    }
     // 调用LoadSSTables()恢复数据
     LoadSSTables();
 
@@ -400,7 +402,7 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) cons
  */
 bool DBImpl::ReplayManifestLog() {
     // 按照格式逐行读取MANIFEST.log
-    LOG_INFO("Load manifest state start.");
+    LOG_INFO("Replay MANIFEST.log start.");
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
         return false;
@@ -408,57 +410,74 @@ bool DBImpl::ReplayManifestLog() {
 
     const fs::path p = fs::path(db_path_) / "MANIFEST.log";
 
-    if (!fs::exists(p)) {
-        LOG_INFO("MANIFEST.log does not exist");
-        return false;
-    }
+    // 语义上“无增量日志”应是正常情况
+    // if (!fs::exists(p)) {
+    //     LOG_ERROR("MANIFEST.log does not exist");
+    //     return false;
+    // }
 
     // 读取出路径后开始解析
     if (std::ifstream ifs(p, std::ios::binary); ifs) {
-        uint32_t magic = 0;
-        uint32_t version = 0;
-        ManifestOp op;
-        uint32_t payload_size = 0;
-        uint64_t id = 0;
-        uint32_t level = 0;
+    // 循环读取，直到读完文件或遇到错误
+    // peek() 可以用来检查是否还有数据，或者直接在读取 magic 时判断
+        while (ifs.peek() != EOF) {
+            uint32_t magic = 0;
+            uint32_t version = 0;
+            ManifestOp op;
+            uint32_t payload_size = 0;
+            uint64_t id = 0;
+            uint32_t level = 0;
 
-        if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
-        if (magic != kManifestMagic) return false;
-        if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-        if (version != kManifestVersion) return false;
-        if (!ifs.read(reinterpret_cast<char*>(&op), sizeof(uint8_t))) return false;
-
-        // 根据op来判断payload_size
-        switch (op) {
-            case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
-            case ManifestOp::AddSST:            payload_size = sizeof(uint64_t) + sizeof(uint32_t); break;
-            case ManifestOp::DelSST:            payload_size = sizeof(uint64_t); break;
-            case ManifestOp::AddWAL:            payload_size = sizeof(uint64_t); break;
-            case ManifestOp::DelWAL:            payload_size = sizeof(uint64_t); break;
-            default: return false;
-        }
-
-        if (!ifs.read(reinterpret_cast<char*>(&payload_size), sizeof(payload_size))) return false;
-
-        // 读 payload
-        switch (op) {
-            case ManifestOp::SetNextFileNumber:
-            case ManifestOp::DelSST:
-            case ManifestOp::AddWAL:
-            case ManifestOp::DelWAL:
-                ifs.read(reinterpret_cast<char*>(&id), sizeof(id));
-                break;
-            case ManifestOp::AddSST:
-                ifs.read(reinterpret_cast<char*>(&id), sizeof(id));       // file_number
-                ifs.read(reinterpret_cast<char*>(&level), sizeof(level)); // level
-                break;
-            default:
+            // 读取并校验 Magic Number
+            if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) break;
+            if (magic != kManifestMagic) {
+                LOG_ERROR("Manifest magic mismatch");
                 return false;
-        }
+            }
 
-        // 全部读完后交给ApplyManifestEdit
-        if (const bool ok = ApplyManifestEdit(op, id, level); !ok) {
-            LOG_ERROR("ApplyManifestEdit Error");
+            // 读取并校验 Version
+            if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+            if (version != kManifestVersion) {
+                LOG_ERROR("Manifest version mismatch");
+                return false;
+            }
+
+            // 读取 Op
+            if (!ifs.read(reinterpret_cast<char*>(&op), sizeof(uint8_t))) return false;
+
+            // 根据 Op 确定预期 Payload 大小
+            switch (op) {
+                case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
+                case ManifestOp::AddSST:            payload_size = sizeof(uint64_t) + sizeof(uint32_t); break;
+                case ManifestOp::DelSST:            payload_size = sizeof(uint64_t); break;
+                case ManifestOp::AddWAL:            payload_size = sizeof(uint64_t); break;
+                case ManifestOp::DelWAL:            payload_size = sizeof(uint64_t); break;
+                default:
+                    LOG_ERROR("Unknown ManifestOp");
+                    return false;
+            }
+
+            // 读取并校验实际 Payload 大小
+            uint32_t log_payload_size = 0;
+            if (!ifs.read(reinterpret_cast<char*>(&log_payload_size), sizeof(log_payload_size))) return false;
+            if (log_payload_size != payload_size) {
+                LOG_ERROR("Replay manifest payload size mismatch");
+                return false;
+            }
+
+            // 读取 Payload 数据
+            if (op == ManifestOp::AddSST) {
+                if (!ifs.read(reinterpret_cast<char*>(&id), sizeof(id))) return false;
+                if (!ifs.read(reinterpret_cast<char*>(&level), sizeof(level))) return false;
+            } else {
+                if (!ifs.read(reinterpret_cast<char*>(&id), sizeof(id))) return false;
+            }
+
+            // 应用这一条编辑记录
+            if (!ApplyManifestEdit(op, id, level)) {
+                LOG_ERROR("ApplyManifestEdit Error");
+                return false;
+            }
         }
     } else {
         LOG_INFO("MANIFEST.log can't be opened.");
