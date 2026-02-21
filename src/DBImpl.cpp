@@ -50,7 +50,10 @@ DBImpl::DBImpl(std::string db_path)
     const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
     manifest_state_.live_wals.insert(new_wal_id);
-    PersistManifestState();
+    if (const bool ok = AppendManifestEdit(ManifestOp::AddWAL, new_wal_id); !ok) {
+        LOG_ERROR("append manifest edit failed, fallback to snapshot");
+        PersistManifestState(); // 兜底
+    }
 
     // 恢复WAL
     RecoverFromWals();
@@ -95,7 +98,10 @@ void DBImpl::MinorCompaction() {
     mem_ = new MemTable(new_wal);
 
     manifest_state_.live_wals.insert(new_wal_id);
-    PersistManifestState();
+    if (const bool ok = AppendManifestEdit(ManifestOp::AddWAL, new_wal_id); !ok) {
+        LOG_ERROR("append manifest edit failed, fallback to snapshot");
+        PersistManifestState(); // 兜底
+    }
 
     // 3. 将 imm_ 落盘为 SSTable
     uint64_t new_sst_id = AllocateFileNumber();
@@ -127,6 +133,9 @@ void DBImpl::MinorCompaction() {
         // 删除旧 WAL 文件
         if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
             manifest_state_.live_wals.erase(old_wal_id);
+            if (const bool ok = AppendManifestEdit(ManifestOp::DelWAL, old_wal_id); !ok) {
+                LOG_ERROR("append manifest edit failed.");
+            }
             LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
         } else {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
@@ -149,7 +158,7 @@ void DBImpl::MinorCompaction() {
 }
 
 void DBImpl::RecoverFromWals() {
-    LOG_INFO(std::string("Recover from wals start."));
+    LOG_INFO(std::string("Recover from wals start"));
 
     // 兜底扫描目录，把旧目录中的 WAL 补录进 manifest_state_
     bool manifest_changed = false;
@@ -163,6 +172,9 @@ void DBImpl::RecoverFromWals() {
             continue;
         }
         if (const uint64_t id = std::stoull(stem); manifest_state_.live_wals.insert(id).second) {
+            if (const bool ok = AppendManifestEdit(ManifestOp::AddWAL, id); !ok) {
+                LOG_ERROR("append manifest edit failed");
+            }
             manifest_changed = true;
         }
     }
@@ -185,7 +197,7 @@ void DBImpl::RecoverFromWals() {
             mem_->ApplyWithoutWal(k, {type, v});
         });
     }
-    LOG_INFO(std::string("Recover from wals completed."));
+    LOG_INFO(std::string("Recover from wals completed"));
 }
 void DBImpl::LoadSSTables() {
     LOG_INFO(std::string("LoadSSTables start"));
@@ -261,7 +273,7 @@ uint64_t DBImpl::AllocateFileNumber() {
     const bool ok = AppendManifestEdit(ManifestOp::SetNextFileNumber,
                                    manifest_state_.next_file_number);
     if (!ok) {
-        LOG_ERROR("append manifest edit failed, fallback to snapshot");
+        LOG_ERROR("Append manifest edit failed, fallback to snapshot");
         PersistManifestState(); // 兜底
     }
     return manifest_state_.next_file_number;
@@ -324,11 +336,10 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) cons
     }
 
     // MANIFEST.log
-    const fs::path final_path = fs::path(db_path_) / "MANIFEST.log";
-    const fs::path tmp_path = fs::path(db_path_) / "MANIFEST.log.tmp";
+    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
 
     // 先写入临时文件
-    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::app); ofs) {
+    if (std::ofstream ofs(p, std::ios::binary | std::ios::app); ofs) {
         uint32_t payload_size = 0;
         switch (op) {
             case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
@@ -376,9 +387,6 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) cons
         LOG_ERROR("Failed to open MANIFEST.log.tmp for writing");
         return false;
     }
-
-    // 原子替换：将 tmp 重命名为正式文件
-    fs::rename(tmp_path, final_path);
     return true;
 }
 void DBImpl::CompactL0ToL1() {
@@ -406,6 +414,9 @@ void DBImpl::CompactL0ToL1() {
 
         for (uint64_t id : l0_input_ids) {
             manifest_state_.sst_levels.erase(id);
+            if (const bool ok = AppendManifestEdit(ManifestOp::DelSST, id, 0); !ok) {
+                LOG_ERROR("Append manifest edit failed.");
+            }
             fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
         }
     };
