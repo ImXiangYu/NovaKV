@@ -427,15 +427,22 @@ bool DBImpl::ReplayManifestLog() {
 
             // 准备读取字段
             uint32_t version = 0;
-            ManifestOp op;
+            uint8_t op_raw = 0;
             uint32_t log_payload_size = 0;
 
             // 一次性检查头部元数据是否完整
             if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version)) ||
-                !ifs.read(reinterpret_cast<char*>(&op), sizeof(uint8_t)) ||
+                !ifs.read(reinterpret_cast<char*>(&op_raw), sizeof(op_raw)) ||
                 !ifs.read(reinterpret_cast<char*>(&log_payload_size), sizeof(log_payload_size))) {
                 LOG_WARN("Truncated manifest header detected at end of file. Stopping.");
                 break;
+            }
+
+            // 转换为 enum class
+            auto op = static_cast<ManifestOp>(op_raw);
+            if (op < ManifestOp::SetNextFileNumber || op > ManifestOp::DelWAL) {
+                LOG_ERROR("Unknown ManifestOp");
+                return false; // 遇到无法识别的指令，说明文件损坏严重
             }
 
             if (version != kManifestVersion) {
