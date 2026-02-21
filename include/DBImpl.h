@@ -50,6 +50,8 @@ class DBImpl {
 
         // Manifest 日志
         bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0) const;
+        bool ReplayManifestLog();
+        bool ApplyManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
 
         struct ManifestState {
             uint64_t next_file_number = 0;

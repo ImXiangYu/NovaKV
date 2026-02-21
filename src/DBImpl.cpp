@@ -40,6 +40,8 @@ DBImpl::DBImpl(std::string db_path)
         PersistManifestState();
     }
 
+    // 回放Log更新manifest_state_
+    ReplayManifestLog();
     // 调用LoadSSTables()恢复数据
     LoadSSTables();
 
@@ -386,11 +388,118 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) cons
         // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
         ofs.close();
     } else {
-        LOG_ERROR("Failed to open MANIFEST.log for writing");
+        LOG_ERROR("Failed to open MANIFEST.log for appending");
         return false;
     }
     return true;
 }
+
+/*
+ * 读取MANIFEST.log
+ * IO + 解析 + 顺序驱动
+ */
+bool DBImpl::ReplayManifestLog() {
+    // 按照格式逐行读取MANIFEST.log
+    LOG_INFO("Load manifest state start.");
+    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
+        LOG_ERROR("DB Path error: " + db_path_);
+        return false;
+    }
+
+    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
+
+    if (!fs::exists(p)) {
+        LOG_INFO("MANIFEST.log does not exist");
+        return false;
+    }
+
+    // 读取出路径后开始解析
+    if (std::ifstream ifs(p, std::ios::binary); ifs) {
+        uint32_t magic = 0;
+        uint32_t version = 0;
+        ManifestOp op;
+        uint32_t payload_size = 0;
+        uint64_t id = 0;
+        uint32_t level = 0;
+
+        if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+        if (magic != kManifestMagic) return false;
+        if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+        if (version != kManifestVersion) return false;
+        if (!ifs.read(reinterpret_cast<char*>(&op), sizeof(uint8_t))) return false;
+
+        // 根据op来判断payload_size
+        switch (op) {
+            case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
+            case ManifestOp::AddSST:            payload_size = sizeof(uint64_t) + sizeof(uint32_t); break;
+            case ManifestOp::DelSST:            payload_size = sizeof(uint64_t); break;
+            case ManifestOp::AddWAL:            payload_size = sizeof(uint64_t); break;
+            case ManifestOp::DelWAL:            payload_size = sizeof(uint64_t); break;
+            default: return false;
+        }
+
+        if (!ifs.read(reinterpret_cast<char*>(&payload_size), sizeof(payload_size))) return false;
+
+        // 读 payload
+        switch (op) {
+            case ManifestOp::SetNextFileNumber:
+            case ManifestOp::DelSST:
+            case ManifestOp::AddWAL:
+            case ManifestOp::DelWAL:
+                ifs.read(reinterpret_cast<char*>(&id), sizeof(id));
+                break;
+            case ManifestOp::AddSST:
+                ifs.read(reinterpret_cast<char*>(&id), sizeof(id));       // file_number
+                ifs.read(reinterpret_cast<char*>(&level), sizeof(level)); // level
+                break;
+            default:
+                return false;
+        }
+
+        // 全部读完后交给ApplyManifestEdit
+        if (const bool ok = ApplyManifestEdit(op, id, level); !ok) {
+            LOG_ERROR("ApplyManifestEdit Error");
+        }
+    } else {
+        LOG_INFO("MANIFEST.log can't be opened.");
+        return false;
+    }
+    return true;
+}
+
+/*
+ * 纯状态变更
+ * 根据 op 改 manifest_state_
+ * payload:
+        SetNextFileNumber: u64 next_file_number
+        AddSST: u64 file_number + u32 level
+        DelSST: u64 file_number
+        AddWAL/DelWAL: u64 wal_id
+ */
+bool DBImpl::ApplyManifestEdit(const ManifestOp op, const uint64_t id, const uint32_t level) {
+    // 负责把内容恢复到 manifest_state_
+    switch (op) {
+        case ManifestOp::SetNextFileNumber:
+            manifest_state_.next_file_number = id;
+            break;
+        case ManifestOp::DelSST:
+            manifest_state_.sst_levels.erase(id);
+            break;
+        case ManifestOp::AddWAL:
+            manifest_state_.live_wals.insert(id);
+            break;
+        case ManifestOp::DelWAL:
+            manifest_state_.live_wals.erase(id);
+            break;
+        case ManifestOp::AddSST:
+            manifest_state_.sst_levels[id] = level;
+            break;
+        default:
+            return false;
+    }
+    return true;
+}
+
 void DBImpl::CompactL0ToL1() {
     // 先判空，无需合并
     if (levels_[0].empty()) return;
