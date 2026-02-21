@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <utility>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -319,7 +320,7 @@ bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
         DelSST: u64 file_number
         AddWAL/DelWAL: u64 wal_id
 */
-bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) const {
+bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
         return false;
@@ -537,14 +538,17 @@ void DBImpl::RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
 void DBImpl::MaybeCheckpointManifest() {
     if (manifest_edits_since_checkpoint_ >= kManifestCheckpointThreshold) {
         // 先保存快照
-        PersistManifestState();
-        // 再清空log
-        if (TruncateManifestLog()) {
-            // 重置数量
-            manifest_edits_since_checkpoint_ = 0;
-            LOG_INFO("Manifest log is written to the snapshot");
+        if (PersistManifestState()) {
+            // 再清空log
+            if (TruncateManifestLog()) {
+                // 重置数量
+                manifest_edits_since_checkpoint_ = 0;
+                LOG_INFO("Manifest log is written to the snapshot");
+            } else {
+                LOG_ERROR("Failed to truncate manifest log");
+            }
         } else {
-            LOG_ERROR("Failed to truncate manifest log");
+            LOG_ERROR("Failed to persist manifest state");
         }
     }
     // 不满足就什么也不做
@@ -553,7 +557,7 @@ void DBImpl::MaybeCheckpointManifest() {
 /*
  * 暂时作用: 清空MANIFEST.log
  */
-bool DBImpl::TruncateManifestLog() const {
+bool DBImpl::TruncateManifestLog() {
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
         return false;
@@ -717,12 +721,12 @@ bool DBImpl::LoadManifestState() {
     return true;
 }
 
-void DBImpl::PersistManifestState() {
+bool DBImpl::PersistManifestState() {
     // 将State写入元数据文件
     // 在db_path_中找一个MANIFEST文件
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
-        return;
+        return false;
     }
 
     const fs::path final_path = fs::path(db_path_) / "MANIFEST";
@@ -760,18 +764,19 @@ void DBImpl::PersistManifestState() {
         ofs.flush(); // 确保操作系统缓冲区已接收数据
         if (!ofs) {
             LOG_ERROR("Failed to write MANIFEST content");
-            return;
+            return false;
         }
 
         // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
         ofs.close();
     } else {
         LOG_ERROR("Failed to open MANIFEST.tmp for writing");
-        return;
+        return false;
     }
 
     // 原子替换：将 tmp 重命名为正式文件
     fs::rename(tmp_path, final_path);
+    return true;
 }
 
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
@@ -871,4 +876,3 @@ void DBImpl::Put(const std::string &key, const ValueRecord &value) {
     // 2. 正常写入
     mem_->Put(key, value);
 }
-

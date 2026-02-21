@@ -30,7 +30,7 @@ class DBImpl {
 
         // 使用Manifest记录sst状态
         bool LoadManifestState();
-        void PersistManifestState();
+        bool PersistManifestState();
 
         // 迭代器
         std::unique_ptr<DBIterator> NewIterator();
@@ -49,14 +49,14 @@ class DBImpl {
         bool HasVisibleValueInL1(const std::string& key) const;
 
         // Manifest 日志
-        bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0) const;
+        bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
         bool ReplayManifestLog();
         bool ApplyManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
 
         // Manifest 日志->快照
         void RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
         void MaybeCheckpointManifest();
-        bool TruncateManifestLog() const;
+        bool TruncateManifestLog();
 
         // manifest log 记录数
         uint32_t manifest_edits_since_checkpoint_ = 0;
