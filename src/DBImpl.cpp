@@ -445,6 +445,21 @@ bool DBImpl::ReplayManifestLog() {
                 return false; // 遇到无法识别的指令，说明文件损坏严重
             }
 
+            uint32_t payload_size = 0;
+            switch (op) {
+                case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
+                case ManifestOp::AddSST:            payload_size = sizeof(uint64_t) + sizeof(uint32_t); break;
+                case ManifestOp::DelSST:            payload_size = sizeof(uint64_t); break;
+                case ManifestOp::AddWAL:            payload_size = sizeof(uint64_t); break;
+                case ManifestOp::DelWAL:            payload_size = sizeof(uint64_t); break;
+                default: return false;
+            }
+
+            if (log_payload_size != payload_size) {
+                LOG_ERROR("Payload size error");
+                return false;
+            }
+
             if (version != kManifestVersion) {
                 LOG_ERROR("Manifest version mismatch");
                 return false; // 版本错误通常是严重的不兼容，直接返回 false
