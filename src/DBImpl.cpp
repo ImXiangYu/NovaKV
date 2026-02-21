@@ -257,11 +257,13 @@ void DBImpl::LoadSSTables() {
 }
 
 uint64_t DBImpl::AllocateFileNumber() {
-    // 分配文件编号，避免到处++next_file_number_ 导致漏改。
-    // 这里++之后要立即PersistNextFileNumber
     ++manifest_state_.next_file_number;
-    // PersistNextFileNumber();
-    PersistManifestState();
+    const bool ok = AppendManifestEdit(ManifestOp::SetNextFileNumber,
+                                   manifest_state_.next_file_number);
+    if (!ok) {
+        LOG_ERROR("append manifest edit failed, fallback to snapshot");
+        PersistManifestState(); // 兜底
+    }
     return manifest_state_.next_file_number;
 }
 
@@ -307,7 +309,7 @@ bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
        DelSST: id = file_number
        AddWAL/DelWAL: id = wal_id
    日志记录格式建议固定为：
-       magic(u32) + version(u16) + op(u8) + payload_size(u32)
+       magic(u32) + version(u32) + op(u8) + payload_size(u32)
        payload 按 op 写入（u64 或 u64+u32）
     payload:
         SetNextFileNumber: u64 next_file_number
@@ -326,7 +328,7 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) cons
     const fs::path tmp_path = fs::path(db_path_) / "MANIFEST.log.tmp";
 
     // 先写入临时文件
-    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc); ofs) {
+    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::app); ofs) {
         uint32_t payload_size = 0;
         switch (op) {
             case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
