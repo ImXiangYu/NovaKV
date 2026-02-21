@@ -43,7 +43,7 @@ DBImpl::DBImpl(std::string db_path)
 
     // 回放Log更新manifest_state_
     if (!ReplayManifestLog()) {
-        LOG_ERROR("replay manifest log failed");
+        throw std::runtime_error("ReplayManifestLog failed");
     }
     // 调用LoadSSTables()恢复数据
     LoadSSTables();
@@ -139,7 +139,7 @@ void DBImpl::MinorCompaction() {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
         }
 
-        PersistManifestState();
+        // PersistManifestState();
     } else {
         LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
@@ -159,7 +159,7 @@ void DBImpl::RecoverFromWals() {
     LOG_INFO(std::string("Recover from wals start"));
 
     // 兜底扫描目录，把旧目录中的 WAL 补录进 manifest_state_
-    bool manifest_changed = false;
+    // bool manifest_changed = false;
     for (auto& entry : fs::directory_iterator(db_path_)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".wal") {
             continue;
@@ -171,12 +171,12 @@ void DBImpl::RecoverFromWals() {
         }
         if (const uint64_t id = std::stoull(stem); manifest_state_.live_wals.insert(id).second) {
             RecordManifestEdit(ManifestOp::AddWAL, id);
-            manifest_changed = true;
+            // manifest_changed = true;
         }
     }
-    if (manifest_changed) {
-        PersistManifestState();
-    }
+    // if (manifest_changed) {
+    //     PersistManifestState();
+    // }
 
     std::vector replay_ids(
         manifest_state_.live_wals.begin(), manifest_state_.live_wals.end());
@@ -539,10 +539,13 @@ void DBImpl::MaybeCheckpointManifest() {
         // 先保存快照
         PersistManifestState();
         // 再清空log
-        TruncateManifestLog();
-        // 最后重置数量
-        manifest_edits_since_checkpoint_ = 0;
-        LOG_INFO("Manifest log is written to the snapshot");
+        if (TruncateManifestLog()) {
+            // 重置数量
+            manifest_edits_since_checkpoint_ = 0;
+            LOG_INFO("Manifest log is written to the snapshot");
+        } else {
+            LOG_ERROR("Failed to truncate manifest log");
+        }
     }
     // 不满足就什么也不做
 }
@@ -550,17 +553,20 @@ void DBImpl::MaybeCheckpointManifest() {
 /*
  * 暂时作用: 清空MANIFEST.log
  */
-void DBImpl::TruncateManifestLog() {
+bool DBImpl::TruncateManifestLog() const {
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
-        return ;
+        return false;
     }
     const fs::path p = fs::path(db_path_) / "MANIFEST.log";
     if (!fs::exists(p)) {
         LOG_ERROR("MANIFEST.log does not exist");
-        return ;
+        return false;
     }
-    std::ofstream ofs(p, std::ios::trunc);
+    if (const std::ofstream ofs(p, std::ios::trunc); ofs) {
+        return true;
+    }
+    return false;
 }
 
 void DBImpl::CompactL0ToL1() {
@@ -596,7 +602,7 @@ void DBImpl::CompactL0ToL1() {
     // mp 为空：无输出，但输入已被消费
     if (mp.empty()) {
         consume_l0();
-        PersistManifestState();
+        // PersistManifestState();
         return;
     }
 
@@ -629,7 +635,7 @@ void DBImpl::CompactL0ToL1() {
         // 没输出就删除
         fs::remove(new_sst_path);
         consume_l0();
-        PersistManifestState();
+        // PersistManifestState();
         return;
     }
 
@@ -640,7 +646,7 @@ void DBImpl::CompactL0ToL1() {
         manifest_state_.sst_levels[new_sst_id] = 1;
         RecordManifestEdit(ManifestOp::AddSST, new_sst_id, 1);
         consume_l0();
-        PersistManifestState();
+        // PersistManifestState();
         return;
     }
 

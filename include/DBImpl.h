@@ -56,7 +56,7 @@ class DBImpl {
         // Manifest 日志->快照
         void RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
         void MaybeCheckpointManifest();
-        void TruncateManifestLog();
+        bool TruncateManifestLog() const;
 
         // manifest log 记录数
         uint32_t manifest_edits_since_checkpoint_ = 0;
