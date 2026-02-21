@@ -410,78 +410,64 @@ bool DBImpl::ReplayManifestLog() {
 
     const fs::path p = fs::path(db_path_) / "MANIFEST.log";
 
-    // 语义上“无增量日志”应是正常情况
-    // if (!fs::exists(p)) {
-    //     LOG_ERROR("MANIFEST.log does not exist");
-    //     return false;
-    // }
-
     // 读取出路径后开始解析
     if (std::ifstream ifs(p, std::ios::binary); ifs) {
-    // 循环读取，直到读完文件或遇到错误
-    // peek() 可以用来检查是否还有数据，或者直接在读取 magic 时判断
-        while (ifs.peek() != EOF) {
+        while (true) {
             uint32_t magic = 0;
+            // 尝试读取 Magic，如果读取不到任何字节，说明文件正常结束
+            if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) {
+                break;
+            }
+
+            // 校验 Magic，如果 Magic 错误，说明接下来的数据已损坏
+            if (magic != kManifestMagic) {
+                LOG_ERROR("Manifest record magic mismatch, possible corruption. Stopping replay.");
+                break;
+            }
+
+            // 准备读取字段
             uint32_t version = 0;
             ManifestOp op;
-            uint32_t payload_size = 0;
-            uint64_t id = 0;
-            uint32_t level = 0;
+            uint32_t log_payload_size = 0;
 
-            // 读取并校验 Magic Number
-            if (!ifs.read(reinterpret_cast<char*>(&magic), sizeof(magic))) break;
-            if (magic != kManifestMagic) {
-                LOG_ERROR("Manifest magic mismatch");
-                return false;
+            // 一次性检查头部元数据是否完整
+            if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version)) ||
+                !ifs.read(reinterpret_cast<char*>(&op), sizeof(uint8_t)) ||
+                !ifs.read(reinterpret_cast<char*>(&log_payload_size), sizeof(log_payload_size))) {
+                LOG_WARN("Truncated manifest header detected at end of file. Stopping.");
+                break;
             }
 
-            // 读取并校验 Version
-            if (!ifs.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
             if (version != kManifestVersion) {
                 LOG_ERROR("Manifest version mismatch");
-                return false;
+                return false; // 版本错误通常是严重的不兼容，直接返回 false
             }
 
-            // 读取 Op
-            if (!ifs.read(reinterpret_cast<char*>(&op), sizeof(uint8_t))) return false;
+            // 根据 OP 校验并读取 Payload
+            uint64_t id = 0;
+            uint32_t level = 0;
+            bool read_success = false;
 
-            // 根据 Op 确定预期 Payload 大小
-            switch (op) {
-                case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t); break;
-                case ManifestOp::AddSST:            payload_size = sizeof(uint64_t) + sizeof(uint32_t); break;
-                case ManifestOp::DelSST:            payload_size = sizeof(uint64_t); break;
-                case ManifestOp::AddWAL:            payload_size = sizeof(uint64_t); break;
-                case ManifestOp::DelWAL:            payload_size = sizeof(uint64_t); break;
-                default:
-                    LOG_ERROR("Unknown ManifestOp");
-                    return false;
-            }
-
-            // 读取并校验实际 Payload 大小
-            uint32_t log_payload_size = 0;
-            if (!ifs.read(reinterpret_cast<char*>(&log_payload_size), sizeof(log_payload_size))) return false;
-            if (log_payload_size != payload_size) {
-                LOG_ERROR("Replay manifest payload size mismatch");
-                return false;
-            }
-
-            // 读取 Payload 数据
             if (op == ManifestOp::AddSST) {
-                if (!ifs.read(reinterpret_cast<char*>(&id), sizeof(id))) return false;
-                if (!ifs.read(reinterpret_cast<char*>(&level), sizeof(level))) return false;
+                // AddSST 需要读取 id (8字节) + level (4字节)
+                read_success = (ifs.read(reinterpret_cast<char*>(&id), sizeof(id)) &&
+                                ifs.read(reinterpret_cast<char*>(&level), sizeof(level)));
             } else {
-                if (!ifs.read(reinterpret_cast<char*>(&id), sizeof(id))) return false;
+                // 其他 Op 均只读取 id (8字节)
+                read_success = !!ifs.read(reinterpret_cast<char*>(&id), sizeof(id));
             }
 
-            // 应用这一条编辑记录
+            if (!read_success) {
+                LOG_WARN("Truncated manifest payload detected. Partial record ignored.");
+                break;
+            }
+
+            // 业务逻辑应用
             if (!ApplyManifestEdit(op, id, level)) {
-                LOG_ERROR("ApplyManifestEdit Error");
+                LOG_ERROR("Failed to apply manifest edit");
                 return false;
             }
         }
-    } else {
-        LOG_INFO("MANIFEST.log can't be opened.");
-        return false;
     }
     return true;
 }
