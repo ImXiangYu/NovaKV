@@ -51,7 +51,7 @@
   - [x] `DBImpl` 只保留对外 API 与调度（`Put/Get/NewIterator`）
   - [x] 锁与线程入口统一放在 `DBImpl`，避免分散在多个模块
 - [ ] 模块封装收口（按顺序）
-  - [ ] `ManifestManager` 收口：内部持有 Manifest 状态，提供语义化接口（替代 `RecordEdit(op, id, level)`）
+  - [x] `ManifestManager` 收口：内部持有 Manifest 状态，提供语义化接口（替代 `RecordEdit(op, id, level)`）
   - [ ] `RecoveryLoader` 收口：减少对 `ManifestState`/回调细节暴露，收敛为恢复阶段接口
   - [ ] `CompactionEngine` 收口：减少长参数与跨模块回调，收敛为 compaction 执行接口
   - [ ] 清理 `DBImpl` 中跨模块桥接胶水（长参数 + lambda），保持行为不变
@@ -64,6 +64,7 @@
 - [ ] 明确 DB 并发策略
   - [ ] 写串行 + 多读并发边界文档化
   - [ ] 核心路径锁粒度收敛
+  - [ ] 将当前 compaction 入口大锁细化为关键区段锁，降低性能开销
 - [ ] 后台化落盘流程
   - [ ] `imm_` 后台 flush（minor compaction）
   - [ ] major compaction 后台线程

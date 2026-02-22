@@ -27,19 +27,19 @@ DBImpl::DBImpl(std::string db_path)
     // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
     levels_.resize(2);
 
-    if (!manifest_manager_.LoadState(manifest_state_)) {
-        recovery_loader_.InitNextFileNumberFromDisk(manifest_state_);
-        manifest_manager_.PersistState(manifest_state_);
+    if (!manifest_manager_.Load()) {
+        recovery_loader_.InitNextFileNumberFromDisk(manifest_manager_.MutableState());
+        manifest_manager_.Persist();
     }
 
-    if (!manifest_manager_.ReplayLog(manifest_state_)) {
+    if (!manifest_manager_.ReplayLog()) {
         throw std::runtime_error("ReplayManifestLog failed");
     }
     recovery_loader_.LoadSSTables(
-        manifest_state_,
+        manifest_manager_.MutableState(),
         levels_,
         [this]() {
-            return manifest_manager_.PersistState(manifest_state_);
+            return manifest_manager_.Persist();
         });
 
     // 3. 初始化第一个活跃的 MemTable
@@ -48,24 +48,30 @@ DBImpl::DBImpl(std::string db_path)
     active_wal_id_ = new_wal_id;
     const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
-    manifest_state_.live_wals.insert(new_wal_id);
-    manifest_manager_.RecordEdit(
-        manifest_state_,
-        manifest_edits_since_checkpoint_,
-        ManifestOp::AddWAL,
-        new_wal_id,
-        0);
+    manifest_manager_.AddWal(new_wal_id);
 
     recovery_loader_.RecoverFromWals(
-        manifest_state_,
+        manifest_manager_.MutableState(),
         mem_,
         [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            manifest_manager_.RecordEdit(
-                manifest_state_,
-                manifest_edits_since_checkpoint_,
-                op,
-                id,
-                level);
+            switch (op) {
+                case ManifestOp::AddWAL:
+                    manifest_manager_.AddWal(id);
+                    break;
+                case ManifestOp::DelWAL:
+                    manifest_manager_.RemoveWal(id);
+                    break;
+                case ManifestOp::AddSST:
+                    manifest_manager_.AddSst(id, level);
+                    break;
+                case ManifestOp::DelSST:
+                    manifest_manager_.RemoveSst(id);
+                    break;
+                case ManifestOp::SetNextFileNumber:
+                    break;
+                default:
+                    break;
+            }
         });
 
     LOG_INFO(std::string("SSTs & WALs Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
@@ -94,7 +100,7 @@ DBImpl::~DBImpl() {
 void DBImpl::MinorCompaction() {
     std::lock_guard<std::mutex> lock(mutex_);
     compaction_engine_.MinorCompaction(
-        manifest_state_,
+        manifest_manager_.MutableState(),
         levels_,
         mem_,
         imm_,
@@ -103,41 +109,58 @@ void DBImpl::MinorCompaction() {
             return AllocateFileNumber();
         },
         [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            manifest_manager_.RecordEdit(
-                manifest_state_,
-                manifest_edits_since_checkpoint_,
-                op,
-                id,
-                level);
+            switch (op) {
+                case ManifestOp::AddWAL:
+                    manifest_manager_.AddWal(id);
+                    break;
+                case ManifestOp::DelWAL:
+                    manifest_manager_.RemoveWal(id);
+                    break;
+                case ManifestOp::AddSST:
+                    manifest_manager_.AddSst(id, level);
+                    break;
+                case ManifestOp::DelSST:
+                    manifest_manager_.RemoveSst(id);
+                    break;
+                case ManifestOp::SetNextFileNumber:
+                    break;
+                default:
+                    break;
+            }
         });
 }
 
 uint64_t DBImpl::AllocateFileNumber() {
-    ++manifest_state_.next_file_number;
-    manifest_manager_.RecordEdit(
-        manifest_state_,
-        manifest_edits_since_checkpoint_,
-        ManifestOp::SetNextFileNumber,
-        manifest_state_.next_file_number,
-        0);
-    return manifest_state_.next_file_number;
+    return manifest_manager_.AllocateFileNumber();
 }
 
 void DBImpl::CompactL0ToL1() {
     std::lock_guard<std::mutex> lock(mutex_);
     compaction_engine_.CompactL0ToL1(
-        manifest_state_,
+        manifest_manager_.MutableState(),
         levels_,
         [this]() {
             return AllocateFileNumber();
         },
         [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            manifest_manager_.RecordEdit(
-                manifest_state_,
-                manifest_edits_since_checkpoint_,
-                op,
-                id,
-                level);
+            switch (op) {
+                case ManifestOp::AddWAL:
+                    manifest_manager_.AddWal(id);
+                    break;
+                case ManifestOp::DelWAL:
+                    manifest_manager_.RemoveWal(id);
+                    break;
+                case ManifestOp::AddSST:
+                    manifest_manager_.AddSst(id, level);
+                    break;
+                case ManifestOp::DelSST:
+                    manifest_manager_.RemoveSst(id);
+                    break;
+                case ManifestOp::SetNextFileNumber:
+                    break;
+                default:
+                    break;
+            }
         });
 }
 

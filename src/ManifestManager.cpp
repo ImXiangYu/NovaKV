@@ -21,88 +21,16 @@ constexpr uint32_t kManifestCheckpointThreshold = 100;
 ManifestManager::ManifestManager(std::string db_path) : db_path_(std::move(db_path)) {
 }
 
-/*
-   参数语义统一为：
-       SetNextFileNumber: id = next_file_number，level 忽略
-       AddSST: id = file_number，level = level
-       DelSST: id = file_number
-       AddWAL/DelWAL: id = wal_id
-   日志记录格式建议固定为：
-       magic(u32) + version(u32) + op(u8) + payload_size(u32)
-       payload 按 op 写入（u64 或 u64+u32）
-    payload:
-        SetNextFileNumber: u64 next_file_number
-        AddSST: u64 file_number + u32 level
-        DelSST: u64 file_number
-        AddWAL/DelWAL: u64 wal_id
-*/
-bool ManifestManager::AppendEdit(const ManifestOp op, const uint64_t id, const uint32_t level) const {
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-
-    // MANIFEST.log
-    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
-
-    if (std::ofstream ofs(p, std::ios::binary | std::ios::app); ofs) {
-        uint32_t payload_size = 0;
-        switch (op) {
-            case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t);
-                break;
-            case ManifestOp::AddSST: payload_size = sizeof(uint64_t) + sizeof(uint32_t);
-                break;
-            case ManifestOp::DelSST: payload_size = sizeof(uint64_t);
-                break;
-            case ManifestOp::AddWAL: payload_size = sizeof(uint64_t);
-                break;
-            case ManifestOp::DelWAL: payload_size = sizeof(uint64_t);
-                break;
-            default: return false;
-        }
-
-        constexpr uint32_t magic = kManifestMagic;
-        constexpr uint32_t version = kManifestVersion;
-        const auto op_u8 = static_cast<uint8_t>(op);
-
-        ofs.write(reinterpret_cast<const char *>(&magic), sizeof(magic));
-        ofs.write(reinterpret_cast<const char *>(&version), sizeof(version));
-        ofs.write(reinterpret_cast<const char *>(&op_u8), sizeof(op_u8));
-        ofs.write(reinterpret_cast<const char *>(&payload_size), sizeof(payload_size));
-
-        switch (op) {
-            case ManifestOp::SetNextFileNumber:
-            case ManifestOp::DelSST:
-            case ManifestOp::AddWAL:
-            case ManifestOp::DelWAL:
-                ofs.write(reinterpret_cast<const char *>(&id), sizeof(id));
-                break;
-            case ManifestOp::AddSST:
-                ofs.write(reinterpret_cast<const char *>(&id), sizeof(id));
-                ofs.write(reinterpret_cast<const char *>(&level), sizeof(level));
-                break;
-            default:
-                return false;
-        }
-
-        ofs.flush();
-        if (!ofs) {
-            LOG_ERROR("Failed to write MANIFEST.log content");
-            return false;
-        }
-        ofs.close();
-    } else {
-        LOG_ERROR("Failed to open MANIFEST.log for appending");
-        return false;
-    }
-    return true;
+bool ManifestManager::Load() {
+    edits_since_checkpoint_ = 0;
+    return LoadState(state_);
 }
 
-/*
- * 读取MANIFEST.log
- * IO + 解析 + 顺序驱动
- */
-bool ManifestManager::ReplayLog(ManifestState &state) const {
+bool ManifestManager::Persist() const {
+    return PersistState(state_);
+}
+
+bool ManifestManager::ReplayLog() {
     LOG_INFO("Replay MANIFEST.log start.");
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);
@@ -185,7 +113,7 @@ bool ManifestManager::ReplayLog(ManifestState &state) const {
                 break;
             }
 
-            if (!ApplyEdit(state, op, id, level)) {
+            if (!ApplyEdit(op, id, level)) {
                 LOG_ERROR("Failed to apply manifest edit");
                 return false;
             }
@@ -197,31 +125,132 @@ bool ManifestManager::ReplayLog(ManifestState &state) const {
     return true;
 }
 
+uint64_t ManifestManager::AllocateFileNumber() {
+    ++state_.next_file_number;
+    RecordEdit(ManifestOp::SetNextFileNumber, state_.next_file_number, 0);
+    return state_.next_file_number;
+}
+
+void ManifestManager::AddWal(const uint64_t wal_id) {
+    state_.live_wals.insert(wal_id);
+    RecordEdit(ManifestOp::AddWAL, wal_id, 0);
+}
+
+void ManifestManager::RemoveWal(const uint64_t wal_id) {
+    state_.live_wals.erase(wal_id);
+    RecordEdit(ManifestOp::DelWAL, wal_id, 0);
+}
+
+void ManifestManager::AddSst(const uint64_t file_number, const uint32_t level) {
+    state_.sst_levels[file_number] = level;
+    RecordEdit(ManifestOp::AddSST, file_number, level);
+}
+
+void ManifestManager::RemoveSst(const uint64_t file_number) {
+    state_.sst_levels.erase(file_number);
+    RecordEdit(ManifestOp::DelSST, file_number, 0);
+}
+
+const ManifestState &ManifestManager::State() const {
+    return state_;
+}
+
+ManifestState &ManifestManager::MutableState() {
+    return state_;
+}
+
 /*
- * 纯状态变更
- * 根据 op 改 manifest_state_
- * payload:
+   参数语义统一为：
+       SetNextFileNumber: id = next_file_number，level 忽略
+       AddSST: id = file_number，level = level
+       DelSST: id = file_number
+       AddWAL/DelWAL: id = wal_id
+   日志记录格式建议固定为：
+       magic(u32) + version(u32) + op(u8) + payload_size(u32)
+       payload 按 op 写入（u64 或 u64+u32）
+    payload:
         SetNextFileNumber: u64 next_file_number
         AddSST: u64 file_number + u32 level
         DelSST: u64 file_number
         AddWAL/DelWAL: u64 wal_id
- */
-bool ManifestManager::ApplyEdit(ManifestState &state, const ManifestOp op, const uint64_t id, const uint32_t level) {
+*/
+bool ManifestManager::AppendEdit(const ManifestOp op, const uint64_t id, const uint32_t level) const {
+    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
+        LOG_ERROR("DB Path error: " + db_path_);
+        return false;
+    }
+
+    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
+
+    if (std::ofstream ofs(p, std::ios::binary | std::ios::app); ofs) {
+        uint32_t payload_size = 0;
+        switch (op) {
+            case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t);
+                break;
+            case ManifestOp::AddSST: payload_size = sizeof(uint64_t) + sizeof(uint32_t);
+                break;
+            case ManifestOp::DelSST: payload_size = sizeof(uint64_t);
+                break;
+            case ManifestOp::AddWAL: payload_size = sizeof(uint64_t);
+                break;
+            case ManifestOp::DelWAL: payload_size = sizeof(uint64_t);
+                break;
+            default: return false;
+        }
+
+        constexpr uint32_t magic = kManifestMagic;
+        constexpr uint32_t version = kManifestVersion;
+        const auto op_u8 = static_cast<uint8_t>(op);
+
+        ofs.write(reinterpret_cast<const char *>(&magic), sizeof(magic));
+        ofs.write(reinterpret_cast<const char *>(&version), sizeof(version));
+        ofs.write(reinterpret_cast<const char *>(&op_u8), sizeof(op_u8));
+        ofs.write(reinterpret_cast<const char *>(&payload_size), sizeof(payload_size));
+
+        switch (op) {
+            case ManifestOp::SetNextFileNumber:
+            case ManifestOp::DelSST:
+            case ManifestOp::AddWAL:
+            case ManifestOp::DelWAL:
+                ofs.write(reinterpret_cast<const char *>(&id), sizeof(id));
+                break;
+            case ManifestOp::AddSST:
+                ofs.write(reinterpret_cast<const char *>(&id), sizeof(id));
+                ofs.write(reinterpret_cast<const char *>(&level), sizeof(level));
+                break;
+            default:
+                return false;
+        }
+
+        ofs.flush();
+        if (!ofs) {
+            LOG_ERROR("Failed to write MANIFEST.log content");
+            return false;
+        }
+        ofs.close();
+    } else {
+        LOG_ERROR("Failed to open MANIFEST.log for appending");
+        return false;
+    }
+    return true;
+}
+
+bool ManifestManager::ApplyEdit(const ManifestOp op, const uint64_t id, const uint32_t level) {
     switch (op) {
         case ManifestOp::SetNextFileNumber:
-            state.next_file_number = id;
+            state_.next_file_number = id;
             break;
         case ManifestOp::DelSST:
-            state.sst_levels.erase(id);
+            state_.sst_levels.erase(id);
             break;
         case ManifestOp::AddWAL:
-            state.live_wals.insert(id);
+            state_.live_wals.insert(id);
             break;
         case ManifestOp::DelWAL:
-            state.live_wals.erase(id);
+            state_.live_wals.erase(id);
             break;
         case ManifestOp::AddSST:
-            state.sst_levels[id] = level;
+            state_.sst_levels[id] = level;
             break;
         default:
             return false;
@@ -229,32 +258,22 @@ bool ManifestManager::ApplyEdit(ManifestState &state, const ManifestOp op, const
     return true;
 }
 
-/*
- * 日志主写 + 失败回退
- */
-void ManifestManager::RecordEdit(ManifestState &state,
-                                 uint32_t &edits_since_checkpoint,
-                                 const ManifestOp op,
-                                 const uint64_t id,
-                                 const uint32_t level) const {
+void ManifestManager::RecordEdit(const ManifestOp op, const uint64_t id, const uint32_t level) {
     if (!AppendEdit(op, id, level)) {
         LOG_ERROR("append manifest edit failed, fallback to snapshot");
-        if (!PersistState(state)) {
+        if (!Persist()) {
             LOG_ERROR("fallback snapshot failed");
         }
         return;
     }
-    ++edits_since_checkpoint;
-    MaybeCheckpoint(state, edits_since_checkpoint);
+    ++edits_since_checkpoint_;
+    MaybeCheckpoint();
 }
 
-/*
- * 检查更新 MANIFEST.log 到 MANIFEST 快照
- */
-void ManifestManager::MaybeCheckpoint(ManifestState &state, uint32_t &edits_since_checkpoint) const {
-    if (edits_since_checkpoint < kManifestCheckpointThreshold) return;
+void ManifestManager::MaybeCheckpoint() {
+    if (edits_since_checkpoint_ < kManifestCheckpointThreshold) return;
 
-    if (!PersistState(state)) {
+    if (!Persist()) {
         LOG_ERROR("checkpoint snapshot failed, keep MANIFEST.log");
         return;
     }
@@ -264,13 +283,10 @@ void ManifestManager::MaybeCheckpoint(ManifestState &state, uint32_t &edits_sinc
         return;
     }
 
-    edits_since_checkpoint = 0;
+    edits_since_checkpoint_ = 0;
     LOG_INFO("Manifest checkpoint completed");
 }
 
-/*
- * 暂时作用: 清空MANIFEST.log
- */
 bool ManifestManager::TruncateLog() const {
     if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
         LOG_ERROR("DB Path error: " + db_path_);

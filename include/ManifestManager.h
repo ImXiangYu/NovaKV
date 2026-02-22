@@ -24,23 +24,31 @@ class ManifestManager {
 public:
     explicit ManifestManager(std::string db_path);
 
+    bool Load();
+    bool Persist() const;
+    bool ReplayLog();
+
+    uint64_t AllocateFileNumber();
+    void AddWal(uint64_t wal_id);
+    void RemoveWal(uint64_t wal_id);
+    void AddSst(uint64_t file_number, uint32_t level);
+    void RemoveSst(uint64_t file_number);
+
+    const ManifestState &State() const;
+    ManifestState &MutableState();
+
+private:
+    bool AppendEdit(ManifestOp op, uint64_t id, uint32_t level = 0) const;
+    bool ApplyEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
+    void RecordEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
+    void MaybeCheckpoint();
+    bool TruncateLog() const;
     bool LoadState(ManifestState &state) const;
     bool PersistState(const ManifestState &state) const;
 
-    bool AppendEdit(ManifestOp op, uint64_t id, uint32_t level = 0) const;
-    bool ReplayLog(ManifestState &state) const;
-    static bool ApplyEdit(ManifestState &state, ManifestOp op, uint64_t id, uint32_t level = 0);
-
-    void RecordEdit(ManifestState &state,
-                    uint32_t &edits_since_checkpoint,
-                    ManifestOp op,
-                    uint64_t id,
-                    uint32_t level = 0) const;
-    void MaybeCheckpoint(ManifestState &state, uint32_t &edits_since_checkpoint) const;
-    bool TruncateLog() const;
-
-private:
     std::string db_path_;
+    uint32_t edits_since_checkpoint_ = 0;
+    ManifestState state_;
 };
 
 #endif // NOVAKV_MANIFESTMANAGER_H

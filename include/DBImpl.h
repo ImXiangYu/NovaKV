@@ -34,11 +34,6 @@ class DBImpl {
         // 管理next_file_number_
         uint64_t AllocateFileNumber();
 
-        // manifest log 记录数
-        uint32_t manifest_edits_since_checkpoint_ = 0;
-
-        ManifestState manifest_state_;
-
         std::string db_path_;
         CompactionEngine compaction_engine_;
         ManifestManager manifest_manager_;
