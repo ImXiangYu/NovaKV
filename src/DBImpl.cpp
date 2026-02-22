@@ -8,15 +8,16 @@
 #include "SSTableBuilder.h"
 #include <filesystem>
 #include <map>
-#include <algorithm>
-#include <cctype>
 #include <utility>
 #include <stdexcept>
 
 namespace fs = std::filesystem;
 
 DBImpl::DBImpl(std::string db_path)
-    : db_path_(std::move(db_path)), manifest_manager_(db_path_), imm_(nullptr) {
+    : db_path_(std::move(db_path)),
+      manifest_manager_(db_path_),
+      recovery_loader_(db_path_),
+      imm_(nullptr) {
     // 1. 确保工作目录存在
     if (!fs::exists(db_path_)) {
         fs::create_directories(db_path_);
@@ -150,117 +151,20 @@ void DBImpl::MinorCompaction() {
 }
 
 void DBImpl::RecoverFromWals() {
-    LOG_INFO(std::string("Recover from wals start"));
-
-    // 兜底扫描目录，把旧目录中的 WAL 补录进 manifest_state_
-    // bool manifest_changed = false;
-    for (auto &entry : fs::directory_iterator(db_path_)) {
-        if (!entry.is_regular_file() || entry.path().extension() != ".wal") {
-            continue;
-        }
-        const std::string stem = entry.path().stem().string();
-        if (!std::all_of(stem.begin(),
-                         stem.end(),
-                         [](const unsigned char c) { return std::isdigit(c); })) {
-            continue;
-        }
-        if (const uint64_t id = std::stoull(stem); manifest_state_.live_wals.insert(id).second) {
-            RecordManifestEdit(ManifestOp::AddWAL, id);
-            // manifest_changed = true;
-        }
-    }
-    // if (manifest_changed) {
-    //     PersistManifestState();
-    // }
-
-    std::vector replay_ids(
-        manifest_state_.live_wals.begin(),
-        manifest_state_.live_wals.end());
-    std::sort(replay_ids.begin(), replay_ids.end());
-
-    for (const uint64_t id : replay_ids) {
-        const std::string wal_path = db_path_ + "/" + std::to_string(id) + ".wal";
-        if (!fs::exists(wal_path)) {
-            LOG_WARN(std::string("Manifest WAL missing on disk: ") + wal_path);
-            continue;
-        }
-        WalHandler handler(wal_path);
-        handler.LoadLog([this](ValueType type, const std::string &k, const std::string &v) {
-            mem_->ApplyWithoutWal(k, {type, v});
+    recovery_loader_.RecoverFromWals(
+        manifest_state_,
+        mem_,
+        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
+            RecordManifestEdit(op, id, level);
         });
-    }
-    LOG_INFO(std::string("Recover from wals completed"));
 }
 void DBImpl::LoadSSTables() {
-    LOG_INFO(std::string("LoadSSTables start"));
-
-    // 通过manifest获取
-    // 先清空levels_
-    for (auto &lv : levels_) {
-        for (const auto *r : lv) delete r;
-        lv.clear();
-    }
-
-    if (!manifest_state_.sst_levels.empty()) {
-        std::vector<std::pair<uint64_t, uint32_t> > entries(
-            manifest_state_.sst_levels.begin(),
-            manifest_state_.sst_levels.end());
-        std::sort(entries.begin(),
-                  entries.end(),
-                  [](const auto &a, const auto &b) { return a.first < b.first; });
-
-        for (const auto &[id, level] : entries) {
-            if (level >= levels_.size()) {
-                LOG_ERROR("Manifest level out of range: " + std::to_string(level));
-                continue;
-            }
-
-            const std::string path = db_path_ + "/" + std::to_string(id) + ".sst";
-            if (!fs::exists(path)) {
-                LOG_ERROR("Manifest SST missing: " + path);
-                continue;
-            }
-
-            if (SSTableReader *reader = SSTableReader::Open(path)) {
-                levels_[level].push_back(reader);
-            } else {
-                LOG_ERROR("Failed to open manifest SST: " + path);
-            }
-        }
-        // 成功后直接return
-        LOG_INFO(std::string("LoadSSTables completed"));
-        return;
-    }
-
-    // 保留扫目录分支
-    std::vector<std::pair<int, std::string> > sstables;
-    for (auto &entry : std::filesystem::directory_iterator(db_path_)) {
-        // 如果每一条的扩展名是.sst，就记录下来
-        if (!entry.is_regular_file() || entry.path().extension() != ".sst") continue;
-        const std::string stem = entry.path().stem().string();
-        if (!std::all_of(stem.begin(),
-                         stem.end(),
-                         [](unsigned char c) { return std::isdigit(c); })) {
-            continue;
-        }
-        const uint64_t id = std::stoull(stem);
-        sstables.emplace_back(id, entry.path().string());
-    }
-    // 之后把sstables从小到大排序，排序后重新Open加到levels_[0]即可
-    std::sort(sstables.begin(), sstables.end());
-
-    for (const auto &[id, path] : sstables) {
-        if (SSTableReader *reader = SSTableReader::Open(path)) {
-            levels_[0].push_back(reader); // 旧逻辑兜底：先归到 L0
-            manifest_state_.sst_levels[id] = 0; // 迁移写回Manifest
-        }
-    }
-
-    if (!manifest_state_.sst_levels.empty()) {
-        PersistManifestState(); // 完成一次迁移落盘
-    }
-
-    LOG_INFO(std::string("LoadSSTables completed"));
+    recovery_loader_.LoadSSTables(
+        manifest_state_,
+        levels_,
+        [this]() {
+            return PersistManifestState();
+        });
 }
 
 uint64_t DBImpl::AllocateFileNumber() {
@@ -270,25 +174,7 @@ uint64_t DBImpl::AllocateFileNumber() {
 }
 
 void DBImpl::InitNextFileNumberFromDisk() {
-    // 负责计算并设置next_file_number_
-    int max_id = 0;
-    for (auto &entry : std::filesystem::directory_iterator(db_path_)) {
-        // 如果每一条的扩展名是.sst 或 .wal ，就记录下来
-        if (entry.is_regular_file()) {
-            if (entry.path().extension() == ".sst" || entry.path().extension() == ".wal") {
-                std::string stem = entry.path().stem().string();
-                // 如果不是全数字就跳过
-                if (!std::all_of(stem.begin(),
-                                 stem.end(),
-                                 [](const unsigned char c) { return std::isdigit(c); })) {
-                    continue;
-                }
-                int id = std::stoi(stem);
-                max_id = std::max(max_id, id);
-            }
-        }
-    }
-    manifest_state_.next_file_number = max_id;
+    recovery_loader_.InitNextFileNumberFromDisk(manifest_state_);
 }
 bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
     for (size_t i = levels_[1].size(); i-- > 0;) {

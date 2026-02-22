@@ -8,6 +8,7 @@
 #include "MemTable.h"
 #include "DBIterator.h"
 #include "ManifestManager.h"
+#include "RecoveryLoader.h"
 #include "SSTableReader.h"
 #include <string>
 #include <vector>
@@ -60,6 +61,7 @@ class DBImpl {
 
         std::string db_path_;
         ManifestManager manifest_manager_;
+        RecoveryLoader recovery_loader_;
 
         // 内存层：解耦后的指针
         MemTable *mem_;

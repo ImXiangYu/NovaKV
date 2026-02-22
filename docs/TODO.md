@@ -45,7 +45,7 @@
 - [ ] 目标：降低 `DBImpl` 复杂度，先做“行为不变重构”
 - [ ] 拆分职责（按顺序）
   - [x] 提取 `ManifestManager`：Manifest 的 load/persist/append/replay/checkpoint
-  - [ ] 提取 `RecoveryLoader`：WAL 回放、SST 加载、`next_file_number` 初始化
+  - [x] 提取 `RecoveryLoader`：WAL 回放、SST 加载、`next_file_number` 初始化
   - [ ] 提取 `CompactionEngine`：`MinorCompaction` 与 `L0->L1` compaction
 - [ ] `DBImpl` 收口
   - [ ] `DBImpl` 只保留对外 API 与调度（`Put/Get/NewIterator`）
