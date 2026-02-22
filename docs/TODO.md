@@ -42,8 +42,8 @@
   - [x] 多 WAL 恢复专项测试
 
 ## Phase 2.5 - DBImpl 重构（进入并发前）
-- [ ] 目标：降低 `DBImpl` 复杂度，先做“行为不变重构”
-- [ ] 拆分职责（按顺序）
+- [x] 目标：降低 `DBImpl` 复杂度，先做“行为不变重构”
+- [x] 拆分职责（按顺序）
   - [x] 提取 `ManifestManager`：Manifest 的 load/persist/append/replay/checkpoint
   - [x] 提取 `RecoveryLoader`：WAL 回放、SST 加载、`next_file_number` 初始化
   - [x] 提取 `CompactionEngine`：`MinorCompaction` 与 `L0->L1` compaction
@@ -55,10 +55,10 @@
   - [x] `RecoveryLoader` 收口：减少对 `ManifestState`/回调细节暴露，收敛为恢复阶段接口
   - [x] `CompactionEngine` 收口：减少长参数与跨模块回调，收敛为 compaction 执行接口
   - [x] 清理 `DBImpl` 中跨模块桥接胶水（长参数 + lambda），保持行为不变
-- [ ] 重构约束（必须满足）
-  - [ ] 不改变 `SET/GET/DEL/SCAN` 对外语义
-  - [ ] 不改变现有 WAL/SST/Manifest 文件格式
-  - [ ] 每拆一块就同步更新对应文档与 TODO 勾选
+- [x] 重构约束（必须满足）
+  - [x] 不改变 `SET/GET/DEL/SCAN` 对外语义
+  - [x] 不改变现有 WAL/SST/Manifest 文件格式
+  - [x] 每拆一块就同步更新对应文档与 TODO 勾选
 
 ## Phase 3 - 并发与后台任务（为网络化做准备）
 - [ ] 明确 DB 并发策略

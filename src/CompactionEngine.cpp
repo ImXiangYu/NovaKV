@@ -28,15 +28,9 @@ void CompactionEngine::MinorCompaction(
     imm = mem;
     LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm->Count()));
 
-    const uint64_t new_wal_id = manifest_manager.AllocateFileNumber();
-    active_wal_id = new_wal_id;
-    std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
-    mem = new MemTable(new_wal);
-
-    manifest_manager.AddWal(new_wal_id);
-
     const uint64_t new_sst_id = manifest_manager.AllocateFileNumber();
     std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
+    bool sst_ready = false;
 
     {
         WritableFile file(sst_path);
@@ -54,16 +48,25 @@ void CompactionEngine::MinorCompaction(
 
     if (SSTableReader *level = SSTableReader::Open(sst_path)) {
         levels[0].push_back(level);
-
         manifest_manager.AddSst(new_sst_id, 0);
+        sst_ready = true;
+    } else {
+        LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
+    }
+
+    const uint64_t new_wal_id = manifest_manager.AllocateFileNumber();
+    active_wal_id = new_wal_id;
+    std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
+    mem = new MemTable(new_wal);
+    manifest_manager.AddWal(new_wal_id);
+
+    if (sst_ready) {
         if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
             manifest_manager.RemoveWal(old_wal_id);
             LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
         } else {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
         }
-    } else {
-        LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
 
     if (levels[0].size() >= 2) {
