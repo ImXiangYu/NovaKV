@@ -25,32 +25,14 @@ class DBImpl {
         void CompactL0ToL1();
         size_t LevelSize(size_t level) const;
 
-        // 使用Manifest记录sst状态
-        bool LoadManifestState();
-        bool PersistManifestState();
-
         // 迭代器
         std::unique_ptr<DBIterator> NewIterator();
 
     private:
         void MinorCompaction();
-        void RecoverFromWals(); // 关键：启动时自动恢复逻辑
-        void LoadSSTables();
 
         // 管理next_file_number_
         uint64_t AllocateFileNumber();
-        // 负责计算并设置next_file_number_
-        void InitNextFileNumberFromDisk();
-
-        // Manifest 日志
-        bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
-        bool ReplayManifestLog();
-        bool ApplyManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
-
-        // Manifest 日志->快照
-        void RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
-        void MaybeCheckpointManifest();
-        bool TruncateManifestLog();
 
         // manifest log 记录数
         uint32_t manifest_edits_since_checkpoint_ = 0;

@@ -27,20 +27,20 @@ DBImpl::DBImpl(std::string db_path)
     // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
     levels_.resize(2);
 
-    // 先尝试从manifest中获取state
-    if (!LoadManifestState()) {
-        // 如果失败，则读磁盘获取
-        InitNextFileNumberFromDisk();
-        // 获取后再写入
-        PersistManifestState();
+    if (!manifest_manager_.LoadState(manifest_state_)) {
+        recovery_loader_.InitNextFileNumberFromDisk(manifest_state_);
+        manifest_manager_.PersistState(manifest_state_);
     }
 
-    // 回放Log更新manifest_state_
-    if (!ReplayManifestLog()) {
+    if (!manifest_manager_.ReplayLog(manifest_state_)) {
         throw std::runtime_error("ReplayManifestLog failed");
     }
-    // 调用LoadSSTables()恢复数据
-    LoadSSTables();
+    recovery_loader_.LoadSSTables(
+        manifest_state_,
+        levels_,
+        [this]() {
+            return manifest_manager_.PersistState(manifest_state_);
+        });
 
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
@@ -49,10 +49,24 @@ DBImpl::DBImpl(std::string db_path)
     const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
     manifest_state_.live_wals.insert(new_wal_id);
-    RecordManifestEdit(ManifestOp::AddWAL, new_wal_id);
+    manifest_manager_.RecordEdit(
+        manifest_state_,
+        manifest_edits_since_checkpoint_,
+        ManifestOp::AddWAL,
+        new_wal_id,
+        0);
 
-    // 恢复WAL
-    RecoverFromWals();
+    recovery_loader_.RecoverFromWals(
+        manifest_state_,
+        mem_,
+        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
+            manifest_manager_.RecordEdit(
+                manifest_state_,
+                manifest_edits_since_checkpoint_,
+                op,
+                id,
+                level);
+        });
 
     LOG_INFO(std::string("SSTs & WALs Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
 }
@@ -89,103 +103,24 @@ void DBImpl::MinorCompaction() {
             return AllocateFileNumber();
         },
         [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            RecordManifestEdit(op, id, level);
-        });
-}
-
-void DBImpl::RecoverFromWals() {
-    recovery_loader_.RecoverFromWals(
-        manifest_state_,
-        mem_,
-        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            RecordManifestEdit(op, id, level);
-        });
-}
-void DBImpl::LoadSSTables() {
-    recovery_loader_.LoadSSTables(
-        manifest_state_,
-        levels_,
-        [this]() {
-            return PersistManifestState();
+            manifest_manager_.RecordEdit(
+                manifest_state_,
+                manifest_edits_since_checkpoint_,
+                op,
+                id,
+                level);
         });
 }
 
 uint64_t DBImpl::AllocateFileNumber() {
     ++manifest_state_.next_file_number;
-    RecordManifestEdit(ManifestOp::SetNextFileNumber, manifest_state_.next_file_number);
-    return manifest_state_.next_file_number;
-}
-
-void DBImpl::InitNextFileNumberFromDisk() {
-    recovery_loader_.InitNextFileNumberFromDisk(manifest_state_);
-}
-
-/*
-   参数语义统一为：
-       SetNextFileNumber: id = next_file_number，level 忽略
-       AddSST: id = file_number，level = level
-       DelSST: id = file_number
-       AddWAL/DelWAL: id = wal_id
-   日志记录格式建议固定为：
-       magic(u32) + version(u32) + op(u8) + payload_size(u32)
-       payload 按 op 写入（u64 或 u64+u32）
-    payload:
-        SetNextFileNumber: u64 next_file_number
-        AddSST: u64 file_number + u32 level
-        DelSST: u64 file_number
-        AddWAL/DelWAL: u64 wal_id
-*/
-bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
-    return manifest_manager_.AppendEdit(op, id, level);
-}
-
-/*
- * 读取MANIFEST.log
- * IO + 解析 + 顺序驱动
- */
-bool DBImpl::ReplayManifestLog() {
-    return manifest_manager_.ReplayLog(manifest_state_);
-}
-
-/*
- * 纯状态变更
- * 根据 op 改 manifest_state_
- * payload:
-        SetNextFileNumber: u64 next_file_number
-        AddSST: u64 file_number + u32 level
-        DelSST: u64 file_number
-        AddWAL/DelWAL: u64 wal_id
- */
-bool DBImpl::ApplyManifestEdit(const ManifestOp op, const uint64_t id, const uint32_t level) {
-    return ManifestManager::ApplyEdit(manifest_state_, op, id, level);
-}
-
-/*
- * 日志主写 + 失败回退
- */
-void DBImpl::RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
     manifest_manager_.RecordEdit(
         manifest_state_,
         manifest_edits_since_checkpoint_,
-        op,
-        id,
-        level);
-}
-
-/*
- * 检查更新 MANIFEST.log 到 MANIFEST 快照
- */
-void DBImpl::MaybeCheckpointManifest() {
-    manifest_manager_.MaybeCheckpoint(
-        manifest_state_,
-        manifest_edits_since_checkpoint_);
-}
-
-/*
- * 暂时作用: 清空MANIFEST.log
- */
-bool DBImpl::TruncateManifestLog() {
-    return manifest_manager_.TruncateLog();
+        ManifestOp::SetNextFileNumber,
+        manifest_state_.next_file_number,
+        0);
+    return manifest_state_.next_file_number;
 }
 
 void DBImpl::CompactL0ToL1() {
@@ -196,21 +131,18 @@ void DBImpl::CompactL0ToL1() {
             return AllocateFileNumber();
         },
         [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            RecordManifestEdit(op, id, level);
+            manifest_manager_.RecordEdit(
+                manifest_state_,
+                manifest_edits_since_checkpoint_,
+                op,
+                id,
+                level);
         });
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {
     if (level >= levels_.size()) return 0;
     return levels_[level].size();
-}
-
-bool DBImpl::LoadManifestState() {
-    return manifest_manager_.LoadState(manifest_state_);
-}
-
-bool DBImpl::PersistManifestState() {
-    return manifest_manager_.PersistState(manifest_state_);
 }
 
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
