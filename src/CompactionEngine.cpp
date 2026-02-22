@@ -12,12 +12,16 @@
 
 namespace fs = std::filesystem;
 
-CompactionEngine::CompactionEngine(std::string db_path) : db_path_(std::move(db_path)) {
+CompactionEngine::CompactionEngine(
+    std::string db_path,
+    ManifestManager &manifest_manager,
+    std::vector<std::vector<SSTableReader *> > &levels)
+    : db_path_(std::move(db_path)),
+      manifest_manager_(manifest_manager),
+      levels_(levels) {
 }
 
 void CompactionEngine::MinorCompaction(
-    ManifestManager &manifest_manager,
-    std::vector<std::vector<SSTableReader *> > &levels,
     MemTable *&mem,
     MemTable *&imm,
     uint64_t &active_wal_id) const {
@@ -28,7 +32,7 @@ void CompactionEngine::MinorCompaction(
     imm = mem;
     LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm->Count()));
 
-    const uint64_t new_sst_id = manifest_manager.AllocateFileNumber();
+    const uint64_t new_sst_id = manifest_manager_.AllocateFileNumber();
     std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
     bool sst_ready = false;
 
@@ -47,60 +51,58 @@ void CompactionEngine::MinorCompaction(
     }
 
     if (SSTableReader *level = SSTableReader::Open(sst_path)) {
-        levels[0].push_back(level);
-        manifest_manager.AddSst(new_sst_id, 0);
+        levels_[0].push_back(level);
+        manifest_manager_.AddSst(new_sst_id, 0);
         sst_ready = true;
     } else {
         LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
     }
 
-    const uint64_t new_wal_id = manifest_manager.AllocateFileNumber();
+    const uint64_t new_wal_id = manifest_manager_.AllocateFileNumber();
     active_wal_id = new_wal_id;
     std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem = new MemTable(new_wal);
-    manifest_manager.AddWal(new_wal_id);
+    manifest_manager_.AddWal(new_wal_id);
 
     if (sst_ready) {
         if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
-            manifest_manager.RemoveWal(old_wal_id);
+            manifest_manager_.RemoveWal(old_wal_id);
             LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
         } else {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
         }
     }
 
-    if (levels[0].size() >= 2) {
-        CompactL0ToL1(manifest_manager, levels);
+    if (levels_[0].size() >= 2) {
+        CompactL0ToL1();
     }
 
     delete imm;
     imm = nullptr;
 }
 
-void CompactionEngine::CompactL0ToL1(
-    ManifestManager &manifest_manager,
-    std::vector<std::vector<SSTableReader *> > &levels) const {
-    if (levels[0].empty()) return;
+void CompactionEngine::CompactL0ToL1() const {
+    if (levels_[0].empty()) return;
     std::map<std::string, ValueRecord> mp;
-    for (auto it = levels[0].rbegin(); it != levels[0].rend(); ++it) {
+    for (auto it = levels_[0].rbegin(); it != levels_[0].rend(); ++it) {
         (*it)->ForEach([&](const std::string &key, const std::string &value, const ValueType type) {
             mp.try_emplace(key, ValueRecord{type, value});
         });
     }
 
     std::vector<uint64_t> l0_input_ids;
-    for (const auto &[id, level] : manifest_manager.SstLevels()) {
+    for (const auto &[id, level] : manifest_manager_.SstLevels()) {
         if (level == 0) l0_input_ids.push_back(id);
     }
 
     auto consume_l0 = [&]() {
-        for (const auto *r : levels[0]) {
+        for (const auto *r : levels_[0]) {
             delete r;
         }
-        levels[0].clear();
+        levels_[0].clear();
 
         for (const uint64_t id : l0_input_ids) {
-            manifest_manager.RemoveSst(id);
+            manifest_manager_.RemoveSst(id);
             fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
         }
     };
@@ -110,7 +112,7 @@ void CompactionEngine::CompactL0ToL1(
         return;
     }
 
-    const uint64_t new_sst_id = manifest_manager.AllocateFileNumber();
+    const uint64_t new_sst_id = manifest_manager_.AllocateFileNumber();
     std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
 
     WritableFile file(new_sst_path);
@@ -122,7 +124,7 @@ void CompactionEngine::CompactL0ToL1(
             builder.Add(key, record.value, ValueType::kValue);
             has_output = true;
         } else {
-            if (HasVisibleValueInL1(levels, key)) {
+            if (HasVisibleValueInL1(key)) {
                 builder.Add(key, "", ValueType::kDeletion);
                 has_output = true;
             }
@@ -139,8 +141,8 @@ void CompactionEngine::CompactL0ToL1(
 
     if (SSTableReader *reader = SSTableReader::Open(new_sst_path)) {
         LOG_INFO(std::string("SSTable created: ") + new_sst_path);
-        levels[1].push_back(reader);
-        manifest_manager.AddSst(new_sst_id, 1);
+        levels_[1].push_back(reader);
+        manifest_manager_.AddSst(new_sst_id, 1);
         consume_l0();
         return;
     }
@@ -149,13 +151,11 @@ void CompactionEngine::CompactL0ToL1(
     fs::remove(new_sst_path);
 }
 
-bool CompactionEngine::HasVisibleValueInL1(
-    const std::vector<std::vector<SSTableReader *> > &levels,
-    const std::string &key) const {
-    if (levels.size() <= 1) return false;
-    for (size_t i = levels[1].size(); i-- > 0;) {
+bool CompactionEngine::HasVisibleValueInL1(const std::string &key) const {
+    if (levels_.size() <= 1) return false;
+    for (size_t i = levels_[1].size(); i-- > 0;) {
         ValueRecord rec{ValueType::kDeletion, ""};
-        if (levels[1][i]->GetRecord(key, &rec)) {
+        if (levels_[1][i]->GetRecord(key, &rec)) {
             if (rec.type == ValueType::kDeletion) {
                 return false;
             }

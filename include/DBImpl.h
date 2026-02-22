@@ -32,17 +32,18 @@ class DBImpl {
         void MinorCompaction();
 
         std::string db_path_;
-        CompactionEngine compaction_engine_;
         ManifestManager manifest_manager_;
-        RecoveryLoader recovery_loader_;
-
-        // 内存层：解耦后的指针
-        MemTable *mem_;
-        MemTable *imm_;
 
         // 磁盘层：已打开的 SST 列表
         // levels_[0] 是 L0，levels_[1] 是 L1
         std::vector<std::vector<SSTableReader*>> levels_;
+
+        CompactionEngine compaction_engine_;
+        RecoveryLoader recovery_loader_;
+
+        // 内存层：解耦后的指针
+        MemTable *mem_ = nullptr;
+        MemTable *imm_ = nullptr;
 
         // 维护active_wal_id_
         uint64_t active_wal_id_ = 0;

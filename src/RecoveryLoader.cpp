@@ -12,12 +12,16 @@
 
 namespace fs = std::filesystem;
 
-RecoveryLoader::RecoveryLoader(std::string db_path) : db_path_(std::move(db_path)) {
+RecoveryLoader::RecoveryLoader(
+    std::string db_path,
+    ManifestManager &manifest_manager,
+    std::vector<std::vector<SSTableReader *> > &levels)
+    : db_path_(std::move(db_path)),
+      manifest_manager_(manifest_manager),
+      levels_(levels) {
 }
 
-void RecoveryLoader::RecoverFromWals(
-    ManifestManager &manifest_manager,
-    MemTable *mem) const {
+void RecoveryLoader::RecoverFromWals(MemTable *mem) const {
     LOG_INFO(std::string("Recover from wals start"));
 
     for (auto &entry : fs::directory_iterator(db_path_)) {
@@ -31,12 +35,12 @@ void RecoveryLoader::RecoverFromWals(
             continue;
         }
         const uint64_t id = std::stoull(stem);
-        manifest_manager.AddWal(id);
+        manifest_manager_.AddWal(id);
     }
 
     std::vector replay_ids(
-        manifest_manager.LiveWals().begin(),
-        manifest_manager.LiveWals().end());
+        manifest_manager_.LiveWals().begin(),
+        manifest_manager_.LiveWals().end());
     std::sort(replay_ids.begin(), replay_ids.end());
 
     for (const uint64_t id : replay_ids) {
@@ -53,26 +57,24 @@ void RecoveryLoader::RecoverFromWals(
     LOG_INFO(std::string("Recover from wals completed"));
 }
 
-void RecoveryLoader::LoadSSTables(
-    ManifestManager &manifest_manager,
-    std::vector<std::vector<SSTableReader *> > &levels) const {
+void RecoveryLoader::LoadSSTables() const {
     LOG_INFO(std::string("LoadSSTables start"));
 
-    for (auto &lv : levels) {
+    for (auto &lv : levels_) {
         for (const auto *r : lv) delete r;
         lv.clear();
     }
 
-    if (!manifest_manager.SstLevels().empty()) {
+    if (!manifest_manager_.SstLevels().empty()) {
         std::vector<std::pair<uint64_t, uint32_t> > entries(
-            manifest_manager.SstLevels().begin(),
-            manifest_manager.SstLevels().end());
+            manifest_manager_.SstLevels().begin(),
+            manifest_manager_.SstLevels().end());
         std::sort(entries.begin(),
                   entries.end(),
                   [](const auto &a, const auto &b) { return a.first < b.first; });
 
         for (const auto &[id, level] : entries) {
-            if (level >= levels.size()) {
+            if (level >= levels_.size()) {
                 LOG_ERROR("Manifest level out of range: " + std::to_string(level));
                 continue;
             }
@@ -84,7 +86,7 @@ void RecoveryLoader::LoadSSTables(
             }
 
             if (SSTableReader *reader = SSTableReader::Open(path)) {
-                levels[level].push_back(reader);
+                levels_[level].push_back(reader);
             } else {
                 LOG_ERROR("Failed to open manifest SST: " + path);
             }
@@ -110,19 +112,19 @@ void RecoveryLoader::LoadSSTables(
 
     for (const auto &[id, path] : sstables) {
         if (SSTableReader *reader = SSTableReader::Open(path)) {
-            levels[0].push_back(reader);
-            manifest_manager.SetSstLevelWithoutEdit(id, 0);
+            levels_[0].push_back(reader);
+            manifest_manager_.SetSstLevelWithoutEdit(id, 0);
         }
     }
 
-    if (!manifest_manager.SstLevels().empty()) {
-        manifest_manager.Persist();
+    if (!manifest_manager_.SstLevels().empty()) {
+        manifest_manager_.Persist();
     }
 
     LOG_INFO(std::string("LoadSSTables completed"));
 }
 
-void RecoveryLoader::InitNextFileNumberFromDisk(ManifestManager &manifest_manager) const {
+void RecoveryLoader::InitNextFileNumberFromDisk() const {
     int max_id = 0;
     for (auto &entry : fs::directory_iterator(db_path_)) {
         if (entry.is_regular_file()) {
@@ -138,5 +140,5 @@ void RecoveryLoader::InitNextFileNumberFromDisk(ManifestManager &manifest_manage
             }
         }
     }
-    manifest_manager.SetNextFileNumberWithoutEdit(max_id);
+    manifest_manager_.SetNextFileNumberWithoutEdit(max_id);
 }

@@ -13,14 +13,19 @@
 
 class RecoveryLoader {
 public:
-    explicit RecoveryLoader(std::string db_path);
+    RecoveryLoader(
+        std::string db_path,
+        ManifestManager &manifest_manager,
+        std::vector<std::vector<SSTableReader *> > &levels);
 
-    void RecoverFromWals(ManifestManager &manifest_manager, MemTable *mem) const;
-    void LoadSSTables(ManifestManager &manifest_manager, std::vector<std::vector<SSTableReader *> > &levels) const;
-    void InitNextFileNumberFromDisk(ManifestManager &manifest_manager) const;
+    void RecoverFromWals(MemTable *mem) const;
+    void LoadSSTables() const;
+    void InitNextFileNumberFromDisk() const;
 
 private:
     std::string db_path_;
+    ManifestManager &manifest_manager_;
+    std::vector<std::vector<SSTableReader *> > &levels_;
 };
 
 #endif // NOVAKV_RECOVERYLOADER_H

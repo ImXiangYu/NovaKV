@@ -13,29 +13,25 @@ namespace fs = std::filesystem;
 
 DBImpl::DBImpl(std::string db_path)
     : db_path_(std::move(db_path)),
-      compaction_engine_(db_path_),
       manifest_manager_(db_path_),
-      recovery_loader_(db_path_),
-      imm_(nullptr) {
+      levels_(2),
+      compaction_engine_(db_path_, manifest_manager_, levels_),
+      recovery_loader_(db_path_, manifest_manager_, levels_) {
     // 1. 确保工作目录存在
     if (!fs::exists(db_path_)) {
         fs::create_directories(db_path_);
     }
     LOG_INFO(std::string("DB path: ") + db_path_);
 
-    // 2. 初始化levels_
-    // 先初始化为两层，即levels_[0] 是 L0，levels_[1] 是 L1
-    levels_.resize(2);
-
     if (!manifest_manager_.Load()) {
-        recovery_loader_.InitNextFileNumberFromDisk(manifest_manager_);
+        recovery_loader_.InitNextFileNumberFromDisk();
         manifest_manager_.Persist();
     }
 
     if (!manifest_manager_.ReplayLog()) {
         throw std::runtime_error("ReplayManifestLog failed");
     }
-    recovery_loader_.LoadSSTables(manifest_manager_, levels_);
+    recovery_loader_.LoadSSTables();
 
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
@@ -45,7 +41,7 @@ DBImpl::DBImpl(std::string db_path)
     mem_ = new MemTable(wal_path);
     manifest_manager_.AddWal(new_wal_id);
 
-    recovery_loader_.RecoverFromWals(manifest_manager_, mem_);
+    recovery_loader_.RecoverFromWals(mem_);
 
     LOG_INFO(std::string("SSTs & WALs Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
 }
@@ -72,17 +68,12 @@ DBImpl::~DBImpl() {
 
 void DBImpl::MinorCompaction() {
     std::lock_guard<std::mutex> lock(mutex_);
-    compaction_engine_.MinorCompaction(
-        manifest_manager_,
-        levels_,
-        mem_,
-        imm_,
-        active_wal_id_);
+    compaction_engine_.MinorCompaction(mem_, imm_, active_wal_id_);
 }
 
 void DBImpl::CompactL0ToL1() {
     std::lock_guard<std::mutex> lock(mutex_);
-    compaction_engine_.CompactL0ToL1(manifest_manager_, levels_);
+    compaction_engine_.CompactL0ToL1();
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {

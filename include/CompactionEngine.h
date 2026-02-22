@@ -13,25 +13,24 @@
 
 class CompactionEngine {
 public:
-    explicit CompactionEngine(std::string db_path);
+    CompactionEngine(
+        std::string db_path,
+        ManifestManager &manifest_manager,
+        std::vector<std::vector<SSTableReader *> > &levels);
 
     void MinorCompaction(
-        ManifestManager &manifest_manager,
-        std::vector<std::vector<SSTableReader *> > &levels,
         MemTable *&mem,
         MemTable *&imm,
         uint64_t &active_wal_id) const;
 
-    void CompactL0ToL1(
-        ManifestManager &manifest_manager,
-        std::vector<std::vector<SSTableReader *> > &levels) const;
+    void CompactL0ToL1() const;
 
 private:
-    bool HasVisibleValueInL1(
-        const std::vector<std::vector<SSTableReader *> > &levels,
-        const std::string &key) const;
+    bool HasVisibleValueInL1(const std::string &key) const;
 
     std::string db_path_;
+    ManifestManager &manifest_manager_;
+    std::vector<std::vector<SSTableReader *> > &levels_;
 };
 
 #endif // NOVAKV_COMPACTIONENGINE_H
