@@ -92,13 +92,13 @@ DBImpl::~DBImpl() {
 }
 
 void DBImpl::MinorCompaction() {
+    std::lock_guard<std::mutex> lock(mutex_);
     compaction_engine_.MinorCompaction(
         manifest_state_,
         levels_,
         mem_,
         imm_,
         active_wal_id_,
-        mutex_,
         [this]() {
             return AllocateFileNumber();
         },
@@ -124,6 +124,7 @@ uint64_t DBImpl::AllocateFileNumber() {
 }
 
 void DBImpl::CompactL0ToL1() {
+    std::lock_guard<std::mutex> lock(mutex_);
     compaction_engine_.CompactL0ToL1(
         manifest_state_,
         levels_,

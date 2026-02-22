@@ -10,7 +10,6 @@
 #include "SSTableReader.h"
 #include <cstdint>
 #include <functional>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -24,7 +23,6 @@ public:
         MemTable *&mem,
         MemTable *&imm,
         uint64_t &active_wal_id,
-        std::mutex &mutex,
         const std::function<uint64_t()> &allocate_file_number,
         const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const;
 

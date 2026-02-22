@@ -49,7 +49,12 @@
   - [x] 提取 `CompactionEngine`：`MinorCompaction` 与 `L0->L1` compaction
 - [ ] `DBImpl` 收口
   - [x] `DBImpl` 只保留对外 API 与调度（`Put/Get/NewIterator`）
-  - [ ] 锁与线程入口统一放在 `DBImpl`，避免分散在多个模块
+  - [x] 锁与线程入口统一放在 `DBImpl`，避免分散在多个模块
+- [ ] 模块封装收口（按顺序）
+  - [ ] `ManifestManager` 收口：内部持有 Manifest 状态，提供语义化接口（替代 `RecordEdit(op, id, level)`）
+  - [ ] `RecoveryLoader` 收口：减少对 `ManifestState`/回调细节暴露，收敛为恢复阶段接口
+  - [ ] `CompactionEngine` 收口：减少长参数与跨模块回调，收敛为 compaction 执行接口
+  - [ ] 清理 `DBImpl` 中跨模块桥接胶水（长参数 + lambda），保持行为不变
 - [ ] 重构约束（必须满足）
   - [ ] 不改变 `SET/GET/DEL/SCAN` 对外语义
   - [ ] 不改变现有 WAL/SST/Manifest 文件格式

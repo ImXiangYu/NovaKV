@@ -21,7 +21,6 @@ void CompactionEngine::MinorCompaction(
     MemTable *&mem,
     MemTable *&imm,
     uint64_t &active_wal_id,
-    std::mutex &mutex,
     const std::function<uint64_t()> &allocate_file_number,
     const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const {
     LOG_INFO("Minor Compaction triggered...");
@@ -57,10 +56,7 @@ void CompactionEngine::MinorCompaction(
     }
 
     if (SSTableReader *level = SSTableReader::Open(sst_path)) {
-        {
-            std::lock_guard lock(mutex);
-            levels[0].push_back(level);
-        }
+        levels[0].push_back(level);
 
         state.sst_levels[new_sst_id] = 0;
         record_manifest_edit(ManifestOp::AddSST, new_sst_id, 0);
