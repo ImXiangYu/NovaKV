@@ -7,6 +7,7 @@
 
 #include "MemTable.h"
 #include "DBIterator.h"
+#include "CompactionEngine.h"
 #include "ManifestManager.h"
 #include "RecoveryLoader.h"
 #include "SSTableReader.h"
@@ -41,9 +42,6 @@ class DBImpl {
         // 负责计算并设置next_file_number_
         void InitNextFileNumberFromDisk();
 
-        // 辅助检查
-        bool HasVisibleValueInL1(const std::string& key) const;
-
         // Manifest 日志
         bool AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level = 0);
         bool ReplayManifestLog();
@@ -60,6 +58,7 @@ class DBImpl {
         ManifestState manifest_state_;
 
         std::string db_path_;
+        CompactionEngine compaction_engine_;
         ManifestManager manifest_manager_;
         RecoveryLoader recovery_loader_;
 

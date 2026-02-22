@@ -3,9 +3,7 @@
 //
 
 #include "DBImpl.h"
-#include "FileFormats.h"
 #include "Logger.h"
-#include "SSTableBuilder.h"
 #include <filesystem>
 #include <map>
 #include <utility>
@@ -15,6 +13,7 @@ namespace fs = std::filesystem;
 
 DBImpl::DBImpl(std::string db_path)
     : db_path_(std::move(db_path)),
+      compaction_engine_(db_path_),
       manifest_manager_(db_path_),
       recovery_loader_(db_path_),
       imm_(nullptr) {
@@ -79,75 +78,19 @@ DBImpl::~DBImpl() {
 }
 
 void DBImpl::MinorCompaction() {
-    LOG_INFO("Minor Compaction triggered...");
-    // 先保存旧wal_id
-    const uint64_t old_wal_id = active_wal_id_;
-    std::string old_wal_path = mem_->GetWalPath();
-
-    // 1. 冻结 mem_ 到 imm_
-    imm_ = mem_;
-    LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm_->Count()));
-
-    // 2. 开启全新的 mem_ 和新的 WAL 文件
-    uint64_t new_wal_id = AllocateFileNumber();
-    active_wal_id_ = new_wal_id;
-    std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
-    mem_ = new MemTable(new_wal);
-
-    manifest_state_.live_wals.insert(new_wal_id);
-    RecordManifestEdit(ManifestOp::AddWAL, new_wal_id);
-
-    // 3. 将 imm_ 落盘为 SSTable
-    uint64_t new_sst_id = AllocateFileNumber();
-    std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
-
-    // 封装落盘逻辑
-    {
-        WritableFile file(sst_path);
-        SSTableBuilder builder(&file);
-
-        auto it = imm_->GetIterator();
-        while (it.Valid()) {
-            builder.Add(it.key(), it.value().value, it.value().type);
-            it.Next();
-        }
-        builder.Finish();
-        file.Flush();
-        LOG_INFO(std::string("SSTable created: ") + sst_path);
-    }
-
-    if (SSTableReader *level = SSTableReader::Open(sst_path)) {
-        // 记得加锁，防止 Get 操作同时遍历 levels[0]
-        {
-            std::lock_guard lock(mutex_);
-            levels_[0].push_back(level);
-        }
-
-        manifest_state_.sst_levels[new_sst_id] = 0;
-        RecordManifestEdit(ManifestOp::AddSST, new_sst_id, 0);
-        // 删除旧 WAL 文件
-        if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
-            manifest_state_.live_wals.erase(old_wal_id);
-            RecordManifestEdit(ManifestOp::DelWAL, old_wal_id);
-            LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
-        } else {
-            LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
-        }
-
-        // PersistManifestState();
-    } else {
-        LOG_ERROR(std::string("Failed to open SSTable: ") + sst_path);
-    }
-
-    // 4. 触发Compact
-    if (levels_[0].size() >= 2) {
-        CompactL0ToL1();
-    }
-
-    // 5. 清理：释放 imm_ 的内存
-    // 在工业级实现里，这里还要删除对应的旧 WAL 文件，我们先只释放指针
-    delete imm_;
-    imm_ = nullptr;
+    compaction_engine_.MinorCompaction(
+        manifest_state_,
+        levels_,
+        mem_,
+        imm_,
+        active_wal_id_,
+        mutex_,
+        [this]() {
+            return AllocateFileNumber();
+        },
+        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
+            RecordManifestEdit(op, id, level);
+        });
 }
 
 void DBImpl::RecoverFromWals() {
@@ -175,19 +118,6 @@ uint64_t DBImpl::AllocateFileNumber() {
 
 void DBImpl::InitNextFileNumberFromDisk() {
     recovery_loader_.InitNextFileNumberFromDisk(manifest_state_);
-}
-bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
-    for (size_t i = levels_[1].size(); i-- > 0;) {
-        ValueRecord rec{ValueType::kDeletion, ""};
-        if (levels_[1][i]->GetRecord(key, &rec)) {
-            if (rec.type == ValueType::kDeletion) {
-                return false;
-            }
-            return true;
-        }
-    }
-    // 没找到
-    return false;
 }
 
 /*
@@ -259,89 +189,15 @@ bool DBImpl::TruncateManifestLog() {
 }
 
 void DBImpl::CompactL0ToL1() {
-    // 先判空，无需合并
-    if (levels_[0].empty()) return;
-    std::map<std::string, ValueRecord> mp;
-    // 倒序遍历levels_[0]
-    for (auto it = levels_[0].rbegin(); it != levels_[0].rend(); ++it) {
-        (*it)->ForEach([&](const std::string &key, const std::string &value, const ValueType type) {
-            mp.try_emplace(key, ValueRecord{type, value});
+    compaction_engine_.CompactL0ToL1(
+        manifest_state_,
+        levels_,
+        [this]() {
+            return AllocateFileNumber();
+        },
+        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
+            RecordManifestEdit(op, id, level);
         });
-    }
-
-    // 先记录本轮输入（当前你是“吃掉全部 L0”，可先取 manifest 里 level=0 的 id）
-    std::vector<uint64_t> l0_input_ids;
-    for (const auto &[id, level] : manifest_state_.sst_levels) {
-        if (level == 0) l0_input_ids.push_back(id);
-    }
-
-    auto consume_l0 = [&]() {
-        for (const auto *r : levels_[0]) {
-            delete r;
-        }
-        levels_[0].clear();
-
-        for (uint64_t id : l0_input_ids) {
-            manifest_state_.sst_levels.erase(id);
-            RecordManifestEdit(ManifestOp::DelSST, id, 0);
-            fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
-        }
-    };
-
-    // mp 为空：无输出，但输入已被消费
-    if (mp.empty()) {
-        consume_l0();
-        // PersistManifestState();
-        return;
-    }
-
-    const uint64_t new_sst_id = AllocateFileNumber();
-    std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
-
-    WritableFile file(new_sst_path);
-    SSTableBuilder builder(&file);
-
-    // 确认需要输出sst
-    bool has_output = false;
-    for (const auto &[key, record] : mp) {
-        if (record.type == ValueType::kValue) {
-            builder.Add(key, record.value, ValueType::kValue);
-            has_output = true;
-        } else {
-            // 如果是kDeletion，就按条件写
-            if (HasVisibleValueInL1(key)) {
-                // 需要遮蔽旧值
-                builder.Add(key, "", ValueType::kDeletion);
-                has_output = true;
-                // 不需要就不写，意味着删除
-            }
-        }
-    }
-    builder.Finish();
-    file.Flush();
-
-    if (!has_output) {
-        // 没输出就删除
-        fs::remove(new_sst_path);
-        consume_l0();
-        // PersistManifestState();
-        return;
-    }
-
-    if (SSTableReader *reader = SSTableReader::Open(new_sst_path)) {
-        LOG_INFO(std::string("SSTable created: ") + new_sst_path);
-        // 暂不做 L1 合并，后续会引入更低层压实
-        levels_[1].push_back(reader);
-        manifest_state_.sst_levels[new_sst_id] = 1;
-        RecordManifestEdit(ManifestOp::AddSST, new_sst_id, 1);
-        consume_l0();
-        // PersistManifestState();
-        return;
-    }
-
-    // 打开新 SST 失败：不消费旧 L0，保持当前进程可见数据
-    LOG_ERROR(std::string("Failed to open SSTable: ") + new_sst_path);
-    fs::remove(new_sst_path);
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {

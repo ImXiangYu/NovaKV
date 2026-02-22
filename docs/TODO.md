@@ -46,7 +46,7 @@
 - [ ] 拆分职责（按顺序）
   - [x] 提取 `ManifestManager`：Manifest 的 load/persist/append/replay/checkpoint
   - [x] 提取 `RecoveryLoader`：WAL 回放、SST 加载、`next_file_number` 初始化
-  - [ ] 提取 `CompactionEngine`：`MinorCompaction` 与 `L0->L1` compaction
+  - [x] 提取 `CompactionEngine`：`MinorCompaction` 与 `L0->L1` compaction
 - [ ] `DBImpl` 收口
   - [ ] `DBImpl` 只保留对外 API 与调度（`Put/Get/NewIterator`）
   - [ ] 锁与线程入口统一放在 `DBImpl`，避免分散在多个模块
