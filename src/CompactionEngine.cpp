@@ -16,13 +16,11 @@ CompactionEngine::CompactionEngine(std::string db_path) : db_path_(std::move(db_
 }
 
 void CompactionEngine::MinorCompaction(
-    ManifestState &state,
+    ManifestManager &manifest_manager,
     std::vector<std::vector<SSTableReader *> > &levels,
     MemTable *&mem,
     MemTable *&imm,
-    uint64_t &active_wal_id,
-    const std::function<uint64_t()> &allocate_file_number,
-    const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const {
+    uint64_t &active_wal_id) const {
     LOG_INFO("Minor Compaction triggered...");
     const uint64_t old_wal_id = active_wal_id;
     std::string old_wal_path = mem->GetWalPath();
@@ -30,15 +28,14 @@ void CompactionEngine::MinorCompaction(
     imm = mem;
     LOG_INFO(std::string("Immutable MemTable items: ") + std::to_string(imm->Count()));
 
-    const uint64_t new_wal_id = allocate_file_number();
+    const uint64_t new_wal_id = manifest_manager.AllocateFileNumber();
     active_wal_id = new_wal_id;
     std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem = new MemTable(new_wal);
 
-    state.live_wals.insert(new_wal_id);
-    record_manifest_edit(ManifestOp::AddWAL, new_wal_id, 0);
+    manifest_manager.AddWal(new_wal_id);
 
-    const uint64_t new_sst_id = allocate_file_number();
+    const uint64_t new_sst_id = manifest_manager.AllocateFileNumber();
     std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
 
     {
@@ -58,11 +55,9 @@ void CompactionEngine::MinorCompaction(
     if (SSTableReader *level = SSTableReader::Open(sst_path)) {
         levels[0].push_back(level);
 
-        state.sst_levels[new_sst_id] = 0;
-        record_manifest_edit(ManifestOp::AddSST, new_sst_id, 0);
+        manifest_manager.AddSst(new_sst_id, 0);
         if (fs::exists(old_wal_path) && fs::remove(old_wal_path)) {
-            state.live_wals.erase(old_wal_id);
-            record_manifest_edit(ManifestOp::DelWAL, old_wal_id, 0);
+            manifest_manager.RemoveWal(old_wal_id);
             LOG_INFO(std::string("Removed old wal file: ") + old_wal_path);
         } else {
             LOG_WARN(std::string("WAL path does not exist: ") + old_wal_path);
@@ -72,7 +67,7 @@ void CompactionEngine::MinorCompaction(
     }
 
     if (levels[0].size() >= 2) {
-        CompactL0ToL1(state, levels, allocate_file_number, record_manifest_edit);
+        CompactL0ToL1(manifest_manager, levels);
     }
 
     delete imm;
@@ -80,10 +75,8 @@ void CompactionEngine::MinorCompaction(
 }
 
 void CompactionEngine::CompactL0ToL1(
-    ManifestState &state,
-    std::vector<std::vector<SSTableReader *> > &levels,
-    const std::function<uint64_t()> &allocate_file_number,
-    const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const {
+    ManifestManager &manifest_manager,
+    std::vector<std::vector<SSTableReader *> > &levels) const {
     if (levels[0].empty()) return;
     std::map<std::string, ValueRecord> mp;
     for (auto it = levels[0].rbegin(); it != levels[0].rend(); ++it) {
@@ -93,7 +86,7 @@ void CompactionEngine::CompactL0ToL1(
     }
 
     std::vector<uint64_t> l0_input_ids;
-    for (const auto &[id, level] : state.sst_levels) {
+    for (const auto &[id, level] : manifest_manager.SstLevels()) {
         if (level == 0) l0_input_ids.push_back(id);
     }
 
@@ -104,8 +97,7 @@ void CompactionEngine::CompactL0ToL1(
         levels[0].clear();
 
         for (const uint64_t id : l0_input_ids) {
-            state.sst_levels.erase(id);
-            record_manifest_edit(ManifestOp::DelSST, id, 0);
+            manifest_manager.RemoveSst(id);
             fs::remove(fs::path(db_path_) / (std::to_string(id) + ".sst"));
         }
     };
@@ -115,7 +107,7 @@ void CompactionEngine::CompactL0ToL1(
         return;
     }
 
-    const uint64_t new_sst_id = allocate_file_number();
+    const uint64_t new_sst_id = manifest_manager.AllocateFileNumber();
     std::string new_sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
 
     WritableFile file(new_sst_path);
@@ -145,8 +137,7 @@ void CompactionEngine::CompactL0ToL1(
     if (SSTableReader *reader = SSTableReader::Open(new_sst_path)) {
         LOG_INFO(std::string("SSTable created: ") + new_sst_path);
         levels[1].push_back(reader);
-        state.sst_levels[new_sst_id] = 1;
-        record_manifest_edit(ManifestOp::AddSST, new_sst_id, 1);
+        manifest_manager.AddSst(new_sst_id, 1);
         consume_l0();
         return;
     }

@@ -29,13 +29,16 @@ public:
     bool ReplayLog();
 
     uint64_t AllocateFileNumber();
-    void AddWal(uint64_t wal_id);
-    void RemoveWal(uint64_t wal_id);
+    bool AddWal(uint64_t wal_id);
+    bool RemoveWal(uint64_t wal_id);
     void AddSst(uint64_t file_number, uint32_t level);
     void RemoveSst(uint64_t file_number);
 
-    const ManifestState &State() const;
-    ManifestState &MutableState();
+    void SetNextFileNumberWithoutEdit(uint64_t next_file_number);
+    void SetSstLevelWithoutEdit(uint64_t file_number, uint32_t level);
+
+    const std::unordered_map<uint64_t, uint32_t> &SstLevels() const;
+    const std::unordered_set<uint64_t> &LiveWals() const;
 
 private:
     bool AppendEdit(ManifestOp op, uint64_t id, uint32_t level = 0) const;

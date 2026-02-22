@@ -8,8 +8,6 @@
 #include "ManifestManager.h"
 #include "MemTable.h"
 #include "SSTableReader.h"
-#include <cstdint>
-#include <functional>
 #include <string>
 #include <vector>
 
@@ -18,19 +16,15 @@ public:
     explicit CompactionEngine(std::string db_path);
 
     void MinorCompaction(
-        ManifestState &state,
+        ManifestManager &manifest_manager,
         std::vector<std::vector<SSTableReader *> > &levels,
         MemTable *&mem,
         MemTable *&imm,
-        uint64_t &active_wal_id,
-        const std::function<uint64_t()> &allocate_file_number,
-        const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const;
+        uint64_t &active_wal_id) const;
 
     void CompactL0ToL1(
-        ManifestState &state,
-        std::vector<std::vector<SSTableReader *> > &levels,
-        const std::function<uint64_t()> &allocate_file_number,
-        const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const;
+        ManifestManager &manifest_manager,
+        std::vector<std::vector<SSTableReader *> > &levels) const;
 
 private:
     bool HasVisibleValueInL1(

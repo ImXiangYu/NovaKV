@@ -16,9 +16,8 @@ RecoveryLoader::RecoveryLoader(std::string db_path) : db_path_(std::move(db_path
 }
 
 void RecoveryLoader::RecoverFromWals(
-    ManifestState &state,
-    MemTable *mem,
-    const std::function<void(ManifestOp, uint64_t, uint32_t)> &record_manifest_edit) const {
+    ManifestManager &manifest_manager,
+    MemTable *mem) const {
     LOG_INFO(std::string("Recover from wals start"));
 
     for (auto &entry : fs::directory_iterator(db_path_)) {
@@ -31,14 +30,13 @@ void RecoveryLoader::RecoverFromWals(
                          [](const unsigned char c) { return std::isdigit(c); })) {
             continue;
         }
-        if (const uint64_t id = std::stoull(stem); state.live_wals.insert(id).second) {
-            record_manifest_edit(ManifestOp::AddWAL, id, 0);
-        }
+        const uint64_t id = std::stoull(stem);
+        manifest_manager.AddWal(id);
     }
 
     std::vector replay_ids(
-        state.live_wals.begin(),
-        state.live_wals.end());
+        manifest_manager.LiveWals().begin(),
+        manifest_manager.LiveWals().end());
     std::sort(replay_ids.begin(), replay_ids.end());
 
     for (const uint64_t id : replay_ids) {
@@ -56,9 +54,8 @@ void RecoveryLoader::RecoverFromWals(
 }
 
 void RecoveryLoader::LoadSSTables(
-    ManifestState &state,
-    std::vector<std::vector<SSTableReader *> > &levels,
-    const std::function<bool()> &persist_manifest_state) const {
+    ManifestManager &manifest_manager,
+    std::vector<std::vector<SSTableReader *> > &levels) const {
     LOG_INFO(std::string("LoadSSTables start"));
 
     for (auto &lv : levels) {
@@ -66,10 +63,10 @@ void RecoveryLoader::LoadSSTables(
         lv.clear();
     }
 
-    if (!state.sst_levels.empty()) {
+    if (!manifest_manager.SstLevels().empty()) {
         std::vector<std::pair<uint64_t, uint32_t> > entries(
-            state.sst_levels.begin(),
-            state.sst_levels.end());
+            manifest_manager.SstLevels().begin(),
+            manifest_manager.SstLevels().end());
         std::sort(entries.begin(),
                   entries.end(),
                   [](const auto &a, const auto &b) { return a.first < b.first; });
@@ -114,18 +111,18 @@ void RecoveryLoader::LoadSSTables(
     for (const auto &[id, path] : sstables) {
         if (SSTableReader *reader = SSTableReader::Open(path)) {
             levels[0].push_back(reader);
-            state.sst_levels[id] = 0;
+            manifest_manager.SetSstLevelWithoutEdit(id, 0);
         }
     }
 
-    if (!state.sst_levels.empty()) {
-        persist_manifest_state();
+    if (!manifest_manager.SstLevels().empty()) {
+        manifest_manager.Persist();
     }
 
     LOG_INFO(std::string("LoadSSTables completed"));
 }
 
-void RecoveryLoader::InitNextFileNumberFromDisk(ManifestState &state) const {
+void RecoveryLoader::InitNextFileNumberFromDisk(ManifestManager &manifest_manager) const {
     int max_id = 0;
     for (auto &entry : fs::directory_iterator(db_path_)) {
         if (entry.is_regular_file()) {
@@ -141,5 +138,5 @@ void RecoveryLoader::InitNextFileNumberFromDisk(ManifestState &state) const {
             }
         }
     }
-    state.next_file_number = max_id;
+    manifest_manager.SetNextFileNumberWithoutEdit(max_id);
 }

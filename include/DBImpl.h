@@ -31,9 +31,6 @@ class DBImpl {
     private:
         void MinorCompaction();
 
-        // 管理next_file_number_
-        uint64_t AllocateFileNumber();
-
         std::string db_path_;
         CompactionEngine compaction_engine_;
         ManifestManager manifest_manager_;

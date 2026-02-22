@@ -131,14 +131,20 @@ uint64_t ManifestManager::AllocateFileNumber() {
     return state_.next_file_number;
 }
 
-void ManifestManager::AddWal(const uint64_t wal_id) {
-    state_.live_wals.insert(wal_id);
+bool ManifestManager::AddWal(const uint64_t wal_id) {
+    if (!state_.live_wals.insert(wal_id).second) {
+        return false;
+    }
     RecordEdit(ManifestOp::AddWAL, wal_id, 0);
+    return true;
 }
 
-void ManifestManager::RemoveWal(const uint64_t wal_id) {
-    state_.live_wals.erase(wal_id);
+bool ManifestManager::RemoveWal(const uint64_t wal_id) {
+    if (state_.live_wals.erase(wal_id) == 0) {
+        return false;
+    }
     RecordEdit(ManifestOp::DelWAL, wal_id, 0);
+    return true;
 }
 
 void ManifestManager::AddSst(const uint64_t file_number, const uint32_t level) {
@@ -151,12 +157,20 @@ void ManifestManager::RemoveSst(const uint64_t file_number) {
     RecordEdit(ManifestOp::DelSST, file_number, 0);
 }
 
-const ManifestState &ManifestManager::State() const {
-    return state_;
+void ManifestManager::SetNextFileNumberWithoutEdit(const uint64_t next_file_number) {
+    state_.next_file_number = next_file_number;
 }
 
-ManifestState &ManifestManager::MutableState() {
-    return state_;
+void ManifestManager::SetSstLevelWithoutEdit(const uint64_t file_number, const uint32_t level) {
+    state_.sst_levels[file_number] = level;
+}
+
+const std::unordered_map<uint64_t, uint32_t> &ManifestManager::SstLevels() const {
+    return state_.sst_levels;
+}
+
+const std::unordered_set<uint64_t> &ManifestManager::LiveWals() const {
+    return state_.live_wals;
 }
 
 /*

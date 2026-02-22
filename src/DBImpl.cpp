@@ -28,51 +28,24 @@ DBImpl::DBImpl(std::string db_path)
     levels_.resize(2);
 
     if (!manifest_manager_.Load()) {
-        recovery_loader_.InitNextFileNumberFromDisk(manifest_manager_.MutableState());
+        recovery_loader_.InitNextFileNumberFromDisk(manifest_manager_);
         manifest_manager_.Persist();
     }
 
     if (!manifest_manager_.ReplayLog()) {
         throw std::runtime_error("ReplayManifestLog failed");
     }
-    recovery_loader_.LoadSSTables(
-        manifest_manager_.MutableState(),
-        levels_,
-        [this]() {
-            return manifest_manager_.Persist();
-        });
+    recovery_loader_.LoadSSTables(manifest_manager_, levels_);
 
     // 3. 初始化第一个活跃的 MemTable
     // 每一个 MemTable 对应一个独立的日志文件
-    const uint64_t new_wal_id = AllocateFileNumber();
+    const uint64_t new_wal_id = manifest_manager_.AllocateFileNumber();
     active_wal_id_ = new_wal_id;
     const std::string wal_path = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
     mem_ = new MemTable(wal_path);
     manifest_manager_.AddWal(new_wal_id);
 
-    recovery_loader_.RecoverFromWals(
-        manifest_manager_.MutableState(),
-        mem_,
-        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            switch (op) {
-                case ManifestOp::AddWAL:
-                    manifest_manager_.AddWal(id);
-                    break;
-                case ManifestOp::DelWAL:
-                    manifest_manager_.RemoveWal(id);
-                    break;
-                case ManifestOp::AddSST:
-                    manifest_manager_.AddSst(id, level);
-                    break;
-                case ManifestOp::DelSST:
-                    manifest_manager_.RemoveSst(id);
-                    break;
-                case ManifestOp::SetNextFileNumber:
-                    break;
-                default:
-                    break;
-            }
-        });
+    recovery_loader_.RecoverFromWals(manifest_manager_, mem_);
 
     LOG_INFO(std::string("SSTs & WALs Recovery complete. Items in memory: ") + std::to_string(mem_->Count()));
 }
@@ -100,68 +73,16 @@ DBImpl::~DBImpl() {
 void DBImpl::MinorCompaction() {
     std::lock_guard<std::mutex> lock(mutex_);
     compaction_engine_.MinorCompaction(
-        manifest_manager_.MutableState(),
+        manifest_manager_,
         levels_,
         mem_,
         imm_,
-        active_wal_id_,
-        [this]() {
-            return AllocateFileNumber();
-        },
-        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            switch (op) {
-                case ManifestOp::AddWAL:
-                    manifest_manager_.AddWal(id);
-                    break;
-                case ManifestOp::DelWAL:
-                    manifest_manager_.RemoveWal(id);
-                    break;
-                case ManifestOp::AddSST:
-                    manifest_manager_.AddSst(id, level);
-                    break;
-                case ManifestOp::DelSST:
-                    manifest_manager_.RemoveSst(id);
-                    break;
-                case ManifestOp::SetNextFileNumber:
-                    break;
-                default:
-                    break;
-            }
-        });
-}
-
-uint64_t DBImpl::AllocateFileNumber() {
-    return manifest_manager_.AllocateFileNumber();
+        active_wal_id_);
 }
 
 void DBImpl::CompactL0ToL1() {
     std::lock_guard<std::mutex> lock(mutex_);
-    compaction_engine_.CompactL0ToL1(
-        manifest_manager_.MutableState(),
-        levels_,
-        [this]() {
-            return AllocateFileNumber();
-        },
-        [this](const ManifestOp op, const uint64_t id, const uint32_t level) {
-            switch (op) {
-                case ManifestOp::AddWAL:
-                    manifest_manager_.AddWal(id);
-                    break;
-                case ManifestOp::DelWAL:
-                    manifest_manager_.RemoveWal(id);
-                    break;
-                case ManifestOp::AddSST:
-                    manifest_manager_.AddSst(id, level);
-                    break;
-                case ManifestOp::DelSST:
-                    manifest_manager_.RemoveSst(id);
-                    break;
-                case ManifestOp::SetNextFileNumber:
-                    break;
-                default:
-                    break;
-            }
-        });
+    compaction_engine_.CompactL0ToL1(manifest_manager_, levels_);
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {
