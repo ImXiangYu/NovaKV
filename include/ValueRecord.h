@@ -8,14 +8,11 @@
 #include <cstdint>
 #include <string>
 
-enum class ValueType : uint8_t {
-    kValue = 1,
-    kDeletion = 2
-};
+enum class ValueType : uint8_t { kValue = 1, kDeletion = 2 };
 
 struct ValueRecord {
-    ValueType type;
-    std::string value;
+  ValueType type;
+  std::string value;
 };
 
-#endif // NOVAKV_VALUERECORD_H
+#endif  // NOVAKV_VALUERECORD_H
