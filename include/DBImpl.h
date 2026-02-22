@@ -7,16 +7,11 @@
 
 #include "MemTable.h"
 #include "DBIterator.h"
+#include "ManifestManager.h"
 #include "SSTableReader.h"
 #include <string>
 #include <vector>
 #include <mutex>
-#include <unordered_set>
-#include <unordered_map>
-
-enum class ManifestOp : uint8_t {
-    SetNextFileNumber=1, AddSST=2, DelSST=3, AddWAL=4, DelWAL=5
-};
 
 class DBImpl {
     public:
@@ -61,14 +56,10 @@ class DBImpl {
         // manifest log 记录数
         uint32_t manifest_edits_since_checkpoint_ = 0;
 
-        struct ManifestState {
-            uint64_t next_file_number = 0;
-            std::unordered_map<uint64_t, uint32_t> sst_levels; // file_number -> level
-            std::unordered_set<uint64_t> live_wals;            // 为多 WAL 恢复闭环预留
-        };
         ManifestState manifest_state_;
 
         std::string db_path_;
+        ManifestManager manifest_manager_;
 
         // 内存层：解耦后的指针
         MemTable *mem_;

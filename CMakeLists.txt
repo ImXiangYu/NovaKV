@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(NOVAKV_SOURCES
     src/BlockBuilder.cpp
     src/DBImpl.cpp
+    src/ManifestManager.cpp
     src/SSTableBuilder.cpp
     src/SSTableReader.cpp
     src/WalHandler.cpp

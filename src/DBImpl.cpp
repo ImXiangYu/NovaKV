@@ -15,14 +15,8 @@
 
 namespace fs = std::filesystem;
 
-namespace {
-constexpr uint32_t kManifestMagic = 0x12345678; // 自定义
-constexpr uint32_t kManifestVersion = 1;
-constexpr uint32_t kManifestCheckpointThreshold = 100;
-} // 匿名
-
 DBImpl::DBImpl(std::string db_path)
-    : db_path_(std::move(db_path)), imm_(nullptr) {
+    : db_path_(std::move(db_path)), manifest_manager_(db_path_), imm_(nullptr) {
     // 1. 确保工作目录存在
     if (!fs::exists(db_path_)) {
         fs::create_directories(db_path_);
@@ -326,69 +320,7 @@ bool DBImpl::HasVisibleValueInL1(const std::string &key) const {
         AddWAL/DelWAL: u64 wal_id
 */
 bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-
-    // MANIFEST.log
-    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
-
-    // 先写入临时文件
-    if (std::ofstream ofs(p, std::ios::binary | std::ios::app); ofs) {
-        uint32_t payload_size = 0;
-        switch (op) {
-            case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t);
-                break;
-            case ManifestOp::AddSST: payload_size = sizeof(uint64_t) + sizeof(uint32_t);
-                break;
-            case ManifestOp::DelSST: payload_size = sizeof(uint64_t);
-                break;
-            case ManifestOp::AddWAL: payload_size = sizeof(uint64_t);
-                break;
-            case ManifestOp::DelWAL: payload_size = sizeof(uint64_t);
-                break;
-            default: return false;
-        }
-
-        // 写 header（字段分开写，不要直接写 struct，避免 padding）
-        constexpr uint32_t magic = kManifestMagic;
-        constexpr uint32_t version = kManifestVersion;
-        const auto op_u8 = static_cast<uint8_t>(op);
-
-        ofs.write(reinterpret_cast<const char *>(&magic), sizeof(magic));
-        ofs.write(reinterpret_cast<const char *>(&version), sizeof(version));
-        ofs.write(reinterpret_cast<const char *>(&op_u8), sizeof(op_u8));
-        ofs.write(reinterpret_cast<const char *>(&payload_size), sizeof(payload_size));
-
-        // 写 payload
-        switch (op) {
-            case ManifestOp::SetNextFileNumber:
-            case ManifestOp::DelSST:
-            case ManifestOp::AddWAL:
-            case ManifestOp::DelWAL:
-                ofs.write(reinterpret_cast<const char *>(&id), sizeof(id));
-                break;
-            case ManifestOp::AddSST:
-                ofs.write(reinterpret_cast<const char *>(&id), sizeof(id)); // file_number
-                ofs.write(reinterpret_cast<const char *>(&level), sizeof(level)); // level
-                break;
-            default:
-                return false;
-        }
-
-        ofs.flush(); // 确保操作系统缓冲区已接收数据
-        if (!ofs) {
-            LOG_ERROR("Failed to write MANIFEST.log content");
-            return false;
-        }
-        // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
-        ofs.close();
-    } else {
-        LOG_ERROR("Failed to open MANIFEST.log for appending");
-        return false;
-    }
-    return true;
+    return manifest_manager_.AppendEdit(op, id, level);
 }
 
 /*
@@ -396,109 +328,7 @@ bool DBImpl::AppendManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
  * IO + 解析 + 顺序驱动
  */
 bool DBImpl::ReplayManifestLog() {
-    // 按照格式逐行读取MANIFEST.log
-    LOG_INFO("Replay MANIFEST.log start.");
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-
-    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
-
-    if (!fs::exists(p)) {
-        return true; // 无增量日志，正常
-    }
-
-    // 读取出路径后开始解析
-    if (std::ifstream ifs(p, std::ios::binary); ifs) {
-        while (true) {
-            uint32_t magic = 0;
-            // 尝试读取 Magic，如果读取不到任何字节，说明文件正常结束
-            if (!ifs.read(reinterpret_cast<char *>(&magic), sizeof(magic))) {
-                break;
-            }
-
-            // 校验 Magic，如果 Magic 错误，说明接下来的数据已损坏
-            if (magic != kManifestMagic) {
-                LOG_ERROR("Manifest record magic mismatch, possible corruption. Stopping replay.");
-                return false;
-            }
-
-            // 准备读取字段
-            uint32_t version = 0;
-            uint8_t op_raw = 0;
-            uint32_t log_payload_size = 0;
-
-            // 一次性检查头部元数据是否完整
-            if (!ifs.read(reinterpret_cast<char *>(&version), sizeof(version)) ||
-                !ifs.read(reinterpret_cast<char *>(&op_raw), sizeof(op_raw)) ||
-                !ifs.read(reinterpret_cast<char *>(&log_payload_size), sizeof(log_payload_size))) {
-                LOG_WARN("Truncated manifest header detected at end of file. Stopping.");
-                break;
-            }
-
-            // 转换为 enum class
-            auto op = static_cast<ManifestOp>(op_raw);
-            if (op < ManifestOp::SetNextFileNumber || op > ManifestOp::DelWAL) {
-                LOG_ERROR("Unknown ManifestOp");
-                return false; // 遇到无法识别的指令，说明文件损坏严重
-            }
-
-            uint32_t payload_size = 0;
-            switch (op) {
-                case ManifestOp::SetNextFileNumber: payload_size = sizeof(uint64_t);
-                    break;
-                case ManifestOp::AddSST: payload_size = sizeof(uint64_t) + sizeof(uint32_t);
-                    break;
-                case ManifestOp::DelSST: payload_size = sizeof(uint64_t);
-                    break;
-                case ManifestOp::AddWAL: payload_size = sizeof(uint64_t);
-                    break;
-                case ManifestOp::DelWAL: payload_size = sizeof(uint64_t);
-                    break;
-                default: return false;
-            }
-
-            if (log_payload_size != payload_size) {
-                LOG_ERROR("Payload size error");
-                return false;
-            }
-
-            if (version != kManifestVersion) {
-                LOG_ERROR("Manifest version mismatch");
-                return false; // 版本错误通常是严重的不兼容，直接返回 false
-            }
-
-            // 根据 OP 校验并读取 Payload
-            uint64_t id = 0;
-            uint32_t level = 0;
-            bool read_success = false;
-
-            if (op == ManifestOp::AddSST) {
-                // AddSST 需要读取 id (8字节) + level (4字节)
-                read_success = (ifs.read(reinterpret_cast<char *>(&id), sizeof(id)) &&
-                    ifs.read(reinterpret_cast<char *>(&level), sizeof(level)));
-            } else {
-                // 其他 Op 均只读取 id (8字节)
-                read_success = !!ifs.read(reinterpret_cast<char *>(&id), sizeof(id));
-            }
-
-            if (!read_success) {
-                LOG_WARN("Truncated manifest payload detected. Partial record ignored.");
-                break;
-            }
-
-            // 业务逻辑应用
-            if (!ApplyManifestEdit(op, id, level)) {
-                LOG_ERROR("Failed to apply manifest edit");
-                return false;
-            }
-        }
-    } else {
-        LOG_ERROR("MANIFEST.log exists but cannot be opened");
-        return false;
-    }
-    return true;
+    return manifest_manager_.ReplayLog(manifest_state_);
 }
 
 /*
@@ -511,81 +341,35 @@ bool DBImpl::ReplayManifestLog() {
         AddWAL/DelWAL: u64 wal_id
  */
 bool DBImpl::ApplyManifestEdit(const ManifestOp op, const uint64_t id, const uint32_t level) {
-    // 负责把内容恢复到 manifest_state_
-    switch (op) {
-        case ManifestOp::SetNextFileNumber:
-            manifest_state_.next_file_number = id;
-            break;
-        case ManifestOp::DelSST:
-            manifest_state_.sst_levels.erase(id);
-            break;
-        case ManifestOp::AddWAL:
-            manifest_state_.live_wals.insert(id);
-            break;
-        case ManifestOp::DelWAL:
-            manifest_state_.live_wals.erase(id);
-            break;
-        case ManifestOp::AddSST:
-            manifest_state_.sst_levels[id] = level;
-            break;
-        default:
-            return false;
-    }
-    return true;
+    return ManifestManager::ApplyEdit(manifest_state_, op, id, level);
 }
 
 /*
  * 日志主写 + 失败回退
  */
 void DBImpl::RecordManifestEdit(ManifestOp op, uint64_t id, uint32_t level) {
-    if (!AppendManifestEdit(op, id, level)) {
-        LOG_ERROR("append manifest edit failed, fallback to snapshot");
-        if (!PersistManifestState()) {
-            LOG_ERROR("fallback snapshot failed");
-        }
-        return;
-    }
-    ++manifest_edits_since_checkpoint_;
-    MaybeCheckpointManifest();
+    manifest_manager_.RecordEdit(
+        manifest_state_,
+        manifest_edits_since_checkpoint_,
+        op,
+        id,
+        level);
 }
 
 /*
  * 检查更新 MANIFEST.log 到 MANIFEST 快照
  */
 void DBImpl::MaybeCheckpointManifest() {
-    if (manifest_edits_since_checkpoint_ < kManifestCheckpointThreshold) return;
-
-    if (!PersistManifestState()) {
-        LOG_ERROR("checkpoint snapshot failed, keep MANIFEST.log");
-        return; // 不截断，不清计数
-    }
-
-    if (!TruncateManifestLog()) {
-        LOG_ERROR("checkpoint truncate failed after snapshot");
-        return; // 不清计数，后续再试
-    }
-
-    manifest_edits_since_checkpoint_ = 0;
-    LOG_INFO("Manifest checkpoint completed");
+    manifest_manager_.MaybeCheckpoint(
+        manifest_state_,
+        manifest_edits_since_checkpoint_);
 }
 
 /*
  * 暂时作用: 清空MANIFEST.log
  */
 bool DBImpl::TruncateManifestLog() {
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-    const fs::path p = fs::path(db_path_) / "MANIFEST.log";
-    if (!fs::exists(p)) {
-        LOG_ERROR("MANIFEST.log does not exist");
-        return false;
-    }
-    if (const std::ofstream ofs(p, std::ios::trunc); ofs) {
-        return true;
-    }
-    return false;
+    return manifest_manager_.TruncateLog();
 }
 
 void DBImpl::CompactL0ToL1() {
@@ -680,120 +464,11 @@ size_t DBImpl::LevelSize(const size_t level) const {
 }
 
 bool DBImpl::LoadManifestState() {
-    // 将写入元数据文件中的State读出来
-    // 在db_path_中找一个MANIFEST文件
-    LOG_INFO("Load manifest state start.");
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-
-    const fs::path p = fs::path(db_path_) / "MANIFEST";
-
-    if (!fs::exists(p)) {
-        return false;
-    }
-
-    if (std::ifstream ifs(p, std::ios::binary); ifs) {
-        // 文件布局:
-        // magic, version, next_file_number, sst_count,
-        // [file_number, level] * sst_count, wal_count, [wal_id] * wal_count
-        uint32_t magic = 0;
-        uint32_t version = 0;
-        uint64_t next_file_number = 0;
-        uint32_t sst_count = 0;
-        uint32_t wal_count = 0;
-
-        if (!ifs.read(reinterpret_cast<char *>(&magic), sizeof(magic))) return false;
-        if (magic != kManifestMagic) return false;
-        if (!ifs.read(reinterpret_cast<char *>(&version), sizeof(version))) return false;
-        if (version != kManifestVersion) return false;
-        if (!ifs.read(reinterpret_cast<char *>(&next_file_number), sizeof(next_file_number))) return false;
-        if (!ifs.read(reinterpret_cast<char *>(&sst_count), sizeof(sst_count))) return false;
-
-        manifest_state_.next_file_number = next_file_number;
-        manifest_state_.sst_levels.clear();
-        for (uint32_t i = 0; i < sst_count; ++i) {
-            uint64_t file_number = 0;
-            uint32_t level = 0;
-            if (!ifs.read(reinterpret_cast<char *>(&file_number), sizeof(file_number))) return false;
-            if (!ifs.read(reinterpret_cast<char *>(&level), sizeof(level))) return false;
-            manifest_state_.sst_levels[file_number] = level;
-        }
-
-        manifest_state_.live_wals.clear();
-        if (!ifs.read(reinterpret_cast<char *>(&wal_count), sizeof(wal_count))) return false;
-        for (uint32_t i = 0; i < wal_count; ++i) {
-            uint64_t wal_id = 0;
-            if (!ifs.read(reinterpret_cast<char *>(&wal_id), sizeof(wal_id))) return false;
-            manifest_state_.live_wals.insert(wal_id);
-        }
-    } else {
-        LOG_INFO("Manifest file can't be opened.");
-        return false;
-    }
-    LOG_INFO("Load manifest state completed.");
-    return true;
+    return manifest_manager_.LoadState(manifest_state_);
 }
 
 bool DBImpl::PersistManifestState() {
-    // 将State写入元数据文件
-    // 在db_path_中找一个MANIFEST文件
-    if (!fs::exists(db_path_) || !fs::is_directory(db_path_)) {
-        LOG_ERROR("DB Path error: " + db_path_);
-        return false;
-    }
-
-    const fs::path final_path = fs::path(db_path_) / "MANIFEST";
-    const fs::path tmp_path = fs::path(db_path_) / "MANIFEST.tmp";
-
-    // 先写入临时文件
-    if (std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc); ofs) {
-        ofs.write(reinterpret_cast<const char *>(&kManifestMagic), sizeof(kManifestMagic));
-        ofs.write(reinterpret_cast<const char *>(&kManifestVersion), sizeof(kManifestVersion));
-        ofs.write(reinterpret_cast<const char *>(&manifest_state_.next_file_number),
-                  sizeof(manifest_state_.next_file_number));
-
-        // SST 映射数量
-        const auto sst_count = static_cast<uint32_t>(manifest_state_.sst_levels.size());
-        ofs.write(reinterpret_cast<const char *>(&sst_count), sizeof(sst_count));
-
-        // 为了文件稳定可读，按 file_number 排序后写入
-        std::vector<std::pair<uint64_t, uint32_t> > sst_entries(
-            manifest_state_.sst_levels.begin(),
-            manifest_state_.sst_levels.end());
-        std::sort(sst_entries.begin(),
-                  sst_entries.end(),
-                  [](const auto &a, const auto &b) { return a.first < b.first; });
-
-        for (const auto &[file_number, level] : sst_entries) {
-            ofs.write(reinterpret_cast<const char *>(&file_number), sizeof(file_number));
-            ofs.write(reinterpret_cast<const char *>(&level), sizeof(level));
-        }
-
-        // WAL 数量（你现在可先写 0 或写 live_wals 真实值）
-        const auto wal_count = static_cast<uint32_t>(manifest_state_.live_wals.size());
-        ofs.write(reinterpret_cast<const char *>(&wal_count), sizeof(wal_count));
-        for (const uint64_t wal_id : manifest_state_.live_wals) {
-            ofs.write(reinterpret_cast<const char *>(&wal_id), sizeof(wal_id));
-        }
-
-        ofs.flush(); // 确保操作系统缓冲区已接收数据
-        if (!ofs) {
-            LOG_ERROR("Failed to write MANIFEST content");
-            return false;
-        }
-
-        // 显式关闭流，确保文件句柄释放，否则在某些系统上 rename 会失败
-        ofs.close();
-    } else {
-        LOG_ERROR("Failed to open MANIFEST.tmp for writing");
-        return false;
-    }
-
-    // 原子替换：将 tmp 重命名为正式文件
-    fs::rename(tmp_path, final_path);
-    return true;
+    return manifest_manager_.PersistState(manifest_state_);
 }
 
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
