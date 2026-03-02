@@ -71,12 +71,12 @@ DBImpl::~DBImpl() {
 }
 
 void DBImpl::MinorCompaction() {
-  std::lock_guard lock(write_mu_);
+  std::unique_lock state_lock(state_mu_);
   compaction_engine_.MinorCompaction(mem_, imm_, active_wal_id_);
 }
 
 void DBImpl::CompactL0ToL1() {
-  std::lock_guard lock(write_mu_);
+  std::unique_lock state_lock(state_mu_);
   compaction_engine_.CompactL0ToL1();
 }
 
@@ -94,11 +94,11 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
   // 最后按 key 升序生成 rows_
   if (mem_) {
     auto s = mem_->Snapshot();
-    for (auto& [k, rec] : s) seen.try_emplace(k, rec);
+    for (auto &[k, rec] : s) seen.try_emplace(k, rec);
   }
   if (imm_) {
     auto s = imm_->Snapshot();
-    for (auto& [k, rec] : s) seen.try_emplace(k, rec);
+    for (auto &[k, rec] : s) seen.try_emplace(k, rec);
   }
 
   // 之后是L0，从新到旧，要逆序遍历
