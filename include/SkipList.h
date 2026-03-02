@@ -226,6 +226,11 @@ class SkipList {
     return Iterator(head->next[0].load());
   }
 
+  Iterator begin() const {
+    // 返回第 0 层的第一个有效节点
+    return Iterator(head->next[0].load());
+  }
+
  private:
   static Node* create_node(K k, V v, int level) {
     return new Node(k, v, level);

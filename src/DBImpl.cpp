@@ -71,12 +71,12 @@ DBImpl::~DBImpl() {
 }
 
 void DBImpl::MinorCompaction() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(write_mu_);
   compaction_engine_.MinorCompaction(mem_, imm_, active_wal_id_);
 }
 
 void DBImpl::CompactL0ToL1() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(write_mu_);
   compaction_engine_.CompactL0ToL1();
 }
 
@@ -86,16 +86,19 @@ size_t DBImpl::LevelSize(const size_t level) const {
 }
 
 std::unique_ptr<DBIterator> DBImpl::NewIterator() {
+  std::shared_lock state_lock(state_mu_);
   std::vector<std::pair<std::string, std::string> > rows;
   std::map<std::string, ValueRecord> seen;
   // 同 key 只保留最新版本，先从mem开始
   // 最新是 kDeletion 就不放入 rows_
   // 最后按 key 升序生成 rows_
-  auto it = mem_->GetIterator();
-  while (it.Valid()) {
-    // 这里的it.value()实际上是ValueRecord
-    seen.try_emplace(it.key(), it.value());
-    it.Next();
+  if (mem_) {
+    auto s = mem_->Snapshot();
+    for (auto& [k, rec] : s) seen.try_emplace(k, rec);
+  }
+  if (imm_) {
+    auto s = imm_->Snapshot();
+    for (auto& [k, rec] : s) seen.try_emplace(k, rec);
   }
 
   // 之后是L0，从新到旧，要逆序遍历
@@ -124,6 +127,7 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
 }
 
 bool DBImpl::Get(const std::string &key, ValueRecord &value) const {
+  std::shared_lock lock(state_mu_);
   // 第一级：查找活跃内存 (MemTable)
   if (mem_ && mem_->Get(key, value)) {
     // 如果是kValue，返回true
@@ -170,13 +174,23 @@ bool DBImpl::Get(const std::string &key, ValueRecord &value) const {
 }
 
 void DBImpl::Put(const std::string &key, const ValueRecord &value) {
-  // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
-  if (mem_->Count() >= 1000) {
-    if (imm_ != nullptr) {
-      // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
-      // 后期我们会用后台线程来优化这里
-      LOG_WARN("Wait: MinorCompaction is too slow...");
+  std::lock_guard write_lock(write_mu_);
+
+  bool need_minor_compaction = false;
+  {
+    std::unique_lock state_lock(state_mu_);
+    // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
+    if (mem_->Count() >= 1000) {
+      if (imm_ != nullptr) {
+        // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
+        // 后期我们会用后台线程来优化这里
+        LOG_WARN("Wait: MinorCompaction is too slow...");
+      }
+      need_minor_compaction = true;
     }
+  }
+  // 把耗时的Compaction放在锁外，避免锁的等待时间过长
+  if (need_minor_compaction) {
     MinorCompaction();
   }
 

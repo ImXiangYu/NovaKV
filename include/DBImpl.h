@@ -49,8 +49,11 @@ class DBImpl {
   // 维护active_wal_id_
   uint64_t active_wal_id_ = 0;
 
-  // 保护元数据和 mem/imm 切换的锁
-  std::mutex mutex_;
+  // 写串行
+  std::mutex write_mu_;
+
+  // 全局状态共享锁
+  mutable std::shared_mutex state_mu_;
 };
 
 #endif  // NOVAKV_DBIMPL_H

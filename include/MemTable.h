@@ -71,6 +71,18 @@ class MemTable {
     return table_.begin();
   }
 
+  using SnapshotRow = std::pair<std::string, ValueRecord>;
+  auto Snapshot() const {
+    std::shared_lock lock(rw_lock_);
+    std::vector<SnapshotRow> snap_result;
+    auto it = table_.begin();
+    while (it.Valid()) {
+      snap_result.emplace_back(it.key(), it.value());
+      it.Next();
+    }
+    return snap_result;
+  }
+
   // [DBImpl]
   // 1. 获取 WalHandler 指针，方便 DBImpl 调用 LoadLog
   WalHandler* GetWalHandler() { return &wal_; }
