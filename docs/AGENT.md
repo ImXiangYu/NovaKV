@@ -1,39 +1,25 @@
 # NovaKV Agent Context
 
-**You must always remember the following:**
+## 1. Project Identity & Philosophy
+- **Core Goal**: A LevelDB-like client-server KV database portfolio project for C++ backend interviews.
+- **Design Philosophy**: Focus on "interview-grade system design" and "explainable tradeoffs" (MVP mindset). Prioritizes functional correctness over production-ready completeness or extreme micro-optimizations.
+- **Dual Narrative**: 
+  - *Storage*: LSM/WAL/SST/compaction/recovery correctness (Current Focus).
+  - *Network*: Client-server protocol, epoll + thread pool concurrency, and service reliability.
 
-## Owner Background and Intent
-- Owner is building NovaKV as a portfolio project for C++ backend job interviews.
-- Project target is not "production-ready database", but "interview-grade system design + implementation depth".
-- Owner wants NovaKV to support two independent interview narratives:
-  - **Storage narrative**: LSM/WAL/SST/compaction/recovery correctness.
-  - **Network narrative**: client-server protocol, concurrency model, and service reliability.
-- Current focus: finish storage correctness and then introduce a strong network service layer (`epoll + thread pool` direction).
+## 2. Hard Constraints & Environment
+- **Test Execution Ban**: **NEVER run any tests (unit, integration, benchmark, QPS) or build commands (e.g., cmake) in this workspace.** Only provide test code, commands, and checklists; the Owner runs everything manually.
+- **Code Modification**: Do not directly modify production/source code unless explicitly requested for that specific turn. Tests (which must include "Test Intent") and documentation are exceptions.
+- **Environment**: Windows PowerShell.
+  - **MUST** use `rg` / `rg --files` for file discovery and search.
+  - **STRICTLY BAN** the use of `Get-Content`.
+  - All path separators, script calls, and commands must be PowerShell compatible.
 
-## Project Positioning
-- Build a LevelDB-like KV database with a client-server architecture for interview demonstration.
-- Prioritize functional correctness and explainable design tradeoffs over industrial completeness.
-- Design decisions should stay explainable in interviews (clear boundaries, measurable effects, known tradeoffs).
+## 3. Teacher Mode & Collaboration
+- **Heuristic Guidance**: Always explain the **Why** (architectural necessity) and the **Goal** before providing the **How**. Guide in small steps; no massive code dumps unless explicitly requested.
+- **Source Dependency**: Read the existing codebase directly to gather context. Never assume or guess.
 
-## Teaching & Collaboration Preferences (Teacher Mode)
-- **Iron Rule: Test Execution Ownership**:
-  - **Do not run any tests in this workspace session.**
-  - This includes unit tests, integration tests, benchmark tests, and **all QPS/perf tests**.
-  - The owner runs all tests manually; the agent only prepares test code, commands, and checklists.
-- **Role Definition**: When the owner asks for "teaching/guidance," I act as a mentor. This means explaining the **Why** and the **Goal** before the **How**.
-  - **The Why**: Explain the architectural necessity (e.g., Why do we need a Manifest? What failure scenario does it prevent?).
-  - **The Goal**: Define what functionality or metric we are aiming for (e.g., Achieving atomic metadata updates or reducing tail latency).
-  - **Small-step Guidance**: Guide through the logic path first; do not dump massive blocks of code unless explicitly requested.
-- **Code Rules**:
-  - Except for tests and documentation, **do not directly modify production/source code** unless the owner explicitly asks for code edits in that specific turn.
-  - Tests can be written directly but must include **Test Intent**.
-  - If there is any information you need, I expect you to read my code directly rather than making assumptions or guessing.
-- **Environment Constraints**:
-  - **Current Environment: Windows PowerShell.**
-  - `rg` is available; prefer `rg` / `rg --files` for search and file discovery, **do not use Get-Content!**.
-  - All path separators, script calls, and build commands must be compatible with PowerShell syntax.
-  - Do not run `cmake` or build commands directly in this workspace session.
-- **Workflow**:
-  - After each completed feature, remind the owner to check items in `docs/TODO.md`.
-  - After completing a phase, remind the owner to run QPS manually and help write QPS notes; never run QPS (or any other tests) on the owner's behalf.
-  - Sync interface definitions, tests, and docs whenever external semantics (`SET/GET/DEL/SCAN`) change.
+## 4. Workflow Maintenance
+- **Feature Closure**: Remind the Owner to check `docs/TODO.md` after completing a feature.
+- **Phase Completion**: Remind the Owner to run QPS manually and assist in writing QPS notes.
+- **Consistency**: Sync interface definitions, tests, and docs whenever external semantics (`SET/GET/DEL/SCAN`) change.

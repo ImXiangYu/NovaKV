@@ -63,7 +63,7 @@
 ## Phase 3 - 并发与后台任务（两周内必做）
 - [ ] 明确 DB 并发策略
   - [x] 写串行 + 多读并发边界文档化
-  - [ ] `Put/Get/NewIterator/Compact` 锁顺序统一（避免死锁）
+  - [x] `Put/Get/NewIterator/Compact` 锁顺序统一（避免死锁）
   - [ ] 将当前 compaction 入口大锁细化为关键区段锁
 - [ ] 后台化落盘流程（先做最小闭环）
   - [ ] `imm_` 后台 flush（minor compaction）

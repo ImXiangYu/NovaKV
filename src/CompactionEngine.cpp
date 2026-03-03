@@ -15,14 +15,14 @@
 namespace fs = std::filesystem;
 
 CompactionEngine::CompactionEngine(
-    std::string db_path, ManifestManager &manifest_manager,
-    std::vector<std::vector<SSTableReader *> > &levels)
+    std::string db_path, ManifestManager& manifest_manager,
+    std::vector<std::vector<SSTableReader*> >& levels)
     : db_path_(std::move(db_path)),
       manifest_manager_(manifest_manager),
       levels_(levels) {}
 
-void CompactionEngine::MinorCompaction(MemTable *&mem, MemTable *&imm,
-                                       uint64_t &active_wal_id) const {
+void CompactionEngine::MinorCompaction(MemTable*& mem, MemTable*& imm,
+                                       uint64_t& active_wal_id) const {
   LOG_INFO("Minor Compaction triggered...");
   const uint64_t old_wal_id = active_wal_id;
   std::string old_wal_path = mem->GetWalPath();
@@ -35,21 +35,19 @@ void CompactionEngine::MinorCompaction(MemTable *&mem, MemTable *&imm,
   std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
   bool sst_ready = false;
 
-  {
-    WritableFile file(sst_path);
-    SSTableBuilder builder(&file);
+  WritableFile file(sst_path);
+  SSTableBuilder builder(&file);
 
-    auto it = imm->GetIterator();
-    while (it.Valid()) {
-      builder.Add(it.key(), it.value().value, it.value().type);
-      it.Next();
-    }
-    builder.Finish();
-    file.Flush();
-    LOG_INFO(std::string("SSTable created: ") + sst_path);
+  auto it = imm->GetIterator();
+  while (it.Valid()) {
+    builder.Add(it.key(), it.value().value, it.value().type);
+    it.Next();
   }
+  builder.Finish();
+  file.Flush();
+  LOG_INFO(std::string("SSTable created: ") + sst_path);
 
-  if (SSTableReader *level = SSTableReader::Open(sst_path)) {
+  if (SSTableReader* level = SSTableReader::Open(sst_path)) {
     levels_[0].push_back(level);
     manifest_manager_.AddSst(new_sst_id, 0);
     sst_ready = true;
@@ -84,19 +82,19 @@ void CompactionEngine::CompactL0ToL1() const {
   if (levels_[0].empty()) return;
   std::map<std::string, ValueRecord> mp;
   for (auto it = levels_[0].rbegin(); it != levels_[0].rend(); ++it) {
-    (*it)->ForEach([&](const std::string &key, const std::string &value,
+    (*it)->ForEach([&](const std::string& key, const std::string& value,
                        const ValueType type) {
       mp.try_emplace(key, ValueRecord{type, value});
     });
   }
 
   std::vector<uint64_t> l0_input_ids;
-  for (const auto &[id, level] : manifest_manager_.SstLevels()) {
+  for (const auto& [id, level] : manifest_manager_.SstLevels()) {
     if (level == 0) l0_input_ids.push_back(id);
   }
 
   auto consume_l0 = [&]() {
-    for (const auto *r : levels_[0]) {
+    for (const auto* r : levels_[0]) {
       delete r;
     }
     levels_[0].clear();
@@ -120,7 +118,7 @@ void CompactionEngine::CompactL0ToL1() const {
   SSTableBuilder builder(&file);
 
   bool has_output = false;
-  for (const auto &[key, record] : mp) {
+  for (const auto& [key, record] : mp) {
     if (record.type == ValueType::kValue) {
       builder.Add(key, record.value, ValueType::kValue);
       has_output = true;
@@ -140,7 +138,7 @@ void CompactionEngine::CompactL0ToL1() const {
     return;
   }
 
-  if (SSTableReader *reader = SSTableReader::Open(new_sst_path)) {
+  if (SSTableReader* reader = SSTableReader::Open(new_sst_path)) {
     LOG_INFO(std::string("SSTable created: ") + new_sst_path);
     levels_[1].push_back(reader);
     manifest_manager_.AddSst(new_sst_id, 1);
@@ -152,7 +150,7 @@ void CompactionEngine::CompactL0ToL1() const {
   fs::remove(new_sst_path);
 }
 
-bool CompactionEngine::HasVisibleValueInL1(const std::string &key) const {
+bool CompactionEngine::HasVisibleValueInL1(const std::string& key) const {
   if (levels_.size() <= 1) return false;
   for (size_t i = levels_[1].size(); i-- > 0;) {
     ValueRecord rec{ValueType::kDeletion, ""};
@@ -163,5 +161,20 @@ bool CompactionEngine::HasVisibleValueInL1(const std::string &key) const {
       return true;
     }
   }
+  return false;
+}
+
+bool CompactionEngine::PrepareMinor(MemTable*& mem, MemTable*& imm,
+                                    uint64_t& active_wal_id,
+                                    MinorCtx& ctx) const {
+  return false;
+}
+
+SSTableReader* CompactionEngine::BuildMinorSST(const MinorCtx& ctx) const {
+  return nullptr;
+}
+
+bool CompactionEngine::InstallMinor(const MinorCtx& ctx, SSTableReader* reader,
+                                    bool& need_l0_compact) const {
   return false;
 }

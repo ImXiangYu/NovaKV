@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <optional>
 
 #include "CompactionEngine.h"
 #include "DBIterator.h"
