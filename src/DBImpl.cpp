@@ -114,8 +114,35 @@ void DBImpl::MinorCompaction() {
 }
 
 void DBImpl::CompactL0ToL1() {
-  std::unique_lock state_lock(state_mu_);
-  compaction_engine_.CompactL0ToL1();
+  CompactionEngine::L0ToL1Ctx ctx;
+  {
+    std::unique_lock state_lock(state_mu_);
+    if (!compaction_engine_.PrepareL0ToL1(ctx)) {
+      return;
+    }
+  }
+
+  SSTableReader* reader = nullptr;
+  if (ctx.has_output) {
+    reader = compaction_engine_.BuildL0ToL1SST(ctx);
+    if (reader == nullptr) {
+      LOG_ERROR("DBImpl::CompactL0ToL1 aborted: BuildL0ToL1SST failed.");
+      return;
+    }
+  }
+
+  {
+    std::unique_lock state_lock(state_mu_);
+    if (!compaction_engine_.InstallL0ToL1(ctx, reader)) {
+      if (reader != nullptr) {
+        delete reader;
+      }
+      if (!ctx.new_sst_path.empty()) {
+        fs::remove(ctx.new_sst_path);
+      }
+      LOG_ERROR("DBImpl::CompactL0ToL1 aborted: InstallL0ToL1 failed.");
+    }
+  }
 }
 
 size_t DBImpl::LevelSize(const size_t level) const {

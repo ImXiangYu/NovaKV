@@ -5,6 +5,8 @@
 #ifndef NOVAKV_COMPACTIONENGINE_H
 #define NOVAKV_COMPACTIONENGINE_H
 
+#include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -35,7 +37,19 @@ class CompactionEngine {
                     const MinorCtx& ctx, SSTableReader* reader,
                     bool& need_l0_compact) const;  // 短操作
 
-  void CompactL0ToL1() const;
+  struct L0ToL1Ctx {
+    std::map<std::string, ValueRecord> merged_l0_records;
+    std::map<std::string, ValueRecord> output_records;
+    std::vector<uint64_t> l0_input_ids;
+    size_t expected_l0_reader_count = 0;
+    uint64_t new_sst_id = 0;
+    std::string new_sst_path;
+    bool has_output = false;
+  };
+
+  bool PrepareL0ToL1(L0ToL1Ctx& ctx) const;  // 短操作
+  SSTableReader* BuildL0ToL1SST(const L0ToL1Ctx& ctx) const;  // 长 IO
+  bool InstallL0ToL1(const L0ToL1Ctx& ctx, SSTableReader* reader) const;
 
  private:
   bool HasVisibleValueInL1(const std::string& key) const;
