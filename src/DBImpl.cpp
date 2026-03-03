@@ -56,8 +56,8 @@ DBImpl::~DBImpl() {
     MinorCompaction();
   }
 
-  for (auto &level : levels_) {
-    for (const auto &reader : level) {
+  for (auto& level : levels_) {
+    for (const auto& reader : level) {
       delete reader;
     }
     level.clear();
@@ -71,8 +71,46 @@ DBImpl::~DBImpl() {
 }
 
 void DBImpl::MinorCompaction() {
-  std::unique_lock state_lock(state_mu_);
-  compaction_engine_.MinorCompaction(mem_, imm_, active_wal_id_);
+  CompactionEngine::MinorCtx ctx;
+  {
+    std::unique_lock state_lock(state_mu_);
+    if (!compaction_engine_.PrepareMinor(mem_, imm_, active_wal_id_, ctx)) {
+      LOG_ERROR("DBImpl::MinorCompaction aborted: PrepareMinor failed.");
+      return;
+    }
+  }
+
+  SSTableReader* reader = compaction_engine_.BuildMinorSST(ctx);
+  if (reader == nullptr) {
+    std::unique_lock state_lock(state_mu_);
+    // Prepare 成功后会设置 imm_=mem_；若 Build 失败需要回滚，避免双指针悬挂
+    if (imm_ == ctx.flushing_imm && mem_ == ctx.flushing_imm) {
+      imm_ = nullptr;
+    }
+    LOG_ERROR("DBImpl::MinorCompaction aborted: BuildMinorSST failed.");
+    return;
+  }
+
+  bool need_l0_compact = false;
+  bool install_ok = false;
+  {
+    std::unique_lock state_lock(state_mu_);
+    install_ok = compaction_engine_.InstallMinor(mem_, imm_, active_wal_id_,
+                                                 ctx, reader, need_l0_compact);
+    if (!install_ok) {
+      // Install 失败时 reader 仍由调用方清理
+      delete reader;
+      if (imm_ == ctx.flushing_imm && mem_ == ctx.flushing_imm) {
+        imm_ = nullptr;
+      }
+      LOG_ERROR("DBImpl::MinorCompaction aborted: InstallMinor failed.");
+      return;
+    }
+  }
+
+  if (need_l0_compact) {
+    CompactL0ToL1();
+  }
 }
 
 void DBImpl::CompactL0ToL1() {
@@ -94,16 +132,16 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
   // 最后按 key 升序生成 rows_
   if (mem_) {
     auto s = mem_->Snapshot();
-    for (auto &[k, rec] : s) seen.try_emplace(k, rec);
+    for (auto& [k, rec] : s) seen.try_emplace(k, rec);
   }
   if (imm_) {
     auto s = imm_->Snapshot();
-    for (auto &[k, rec] : s) seen.try_emplace(k, rec);
+    for (auto& [k, rec] : s) seen.try_emplace(k, rec);
   }
 
   // 之后是L0，从新到旧，要逆序遍历
   for (auto l = levels_[0].rbegin(); l != levels_[0].rend(); ++l) {
-    (*l)->ForEach([&](const std::string &key, const std::string &value,
+    (*l)->ForEach([&](const std::string& key, const std::string& value,
                       const ValueType type) {
       seen.try_emplace(key, ValueRecord{type, value});
     });
@@ -111,13 +149,13 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
 
   // L1 同上
   for (auto l = levels_[1].rbegin(); l != levels_[1].rend(); ++l) {
-    (*l)->ForEach([&](const std::string &key, const std::string &value,
+    (*l)->ForEach([&](const std::string& key, const std::string& value,
                       const ValueType type) {
       seen.try_emplace(key, ValueRecord{type, value});
     });
   }
 
-  for (const auto &[fst, snd] : seen) {
+  for (const auto& [fst, snd] : seen) {
     if (snd.type == ValueType::kValue) {
       rows.emplace_back(fst, snd.value);
     }
@@ -126,7 +164,7 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
   return std::make_unique<DBIterator>(std::move(rows));
 }
 
-bool DBImpl::Get(const std::string &key, ValueRecord &value) const {
+bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
   std::shared_lock lock(state_mu_);
   // 第一级：查找活跃内存 (MemTable)
   if (mem_ && mem_->Get(key, value)) {
@@ -173,7 +211,7 @@ bool DBImpl::Get(const std::string &key, ValueRecord &value) const {
   return false;
 }
 
-void DBImpl::Put(const std::string &key, const ValueRecord &value) {
+void DBImpl::Put(const std::string& key, const ValueRecord& value) {
   std::lock_guard write_lock(write_mu_);
 
   bool need_minor_compaction = false;

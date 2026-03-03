@@ -17,14 +17,6 @@ class CompactionEngine {
   CompactionEngine(std::string db_path, ManifestManager& manifest_manager,
                    std::vector<std::vector<SSTableReader*> >& levels);
 
-  void MinorCompaction(MemTable*& mem, MemTable*& imm,
-                       uint64_t& active_wal_id) const;
-
-  void CompactL0ToL1() const;
-
- private:
-  bool HasVisibleValueInL1(const std::string& key) const;
-
   // 把完整的MinorCompaction拆分成三阶段分别加锁
   // 这样可以保证最耗时的写SST不在锁中
   // CompactionEngine.h
@@ -39,8 +31,14 @@ class CompactionEngine {
   bool PrepareMinor(MemTable*& mem, MemTable*& imm, uint64_t& active_wal_id,
                     MinorCtx& ctx) const;                   // 短操作
   SSTableReader* BuildMinorSST(const MinorCtx& ctx) const;  // 长 IO
-  bool InstallMinor(const MinorCtx& ctx, SSTableReader* reader,
+  bool InstallMinor(MemTable*& mem, MemTable*& imm, uint64_t& active_wal_id,
+                    const MinorCtx& ctx, SSTableReader* reader,
                     bool& need_l0_compact) const;  // 短操作
+
+  void CompactL0ToL1() const;
+
+ private:
+  bool HasVisibleValueInL1(const std::string& key) const;
 
   std::string db_path_;
   ManifestManager& manifest_manager_;
