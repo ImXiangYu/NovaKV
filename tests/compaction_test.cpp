@@ -56,7 +56,7 @@ uint64_t GetMaxFileNumberOnDisk(const std::string& dir) {
                      [](unsigned char c) { return std::isdigit(c); })) {
       continue;
     }
-    max_id = std::max(max_id, std::stoull(stem));
+    max_id = std::max(max_id, static_cast<uint64_t>(std::stoull(stem)));
   }
   return max_id;
 }
