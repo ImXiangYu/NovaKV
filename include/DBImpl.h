@@ -21,11 +21,11 @@
 #include "SSTableReader.h"
 
 struct DBStatus {
-  size_t mem_count;                 // 活跃内存条数
-  size_t imm_count;                 // 待落盘内存条数
-  size_t l0_count;                  // L0 文件数
-  size_t l1_count;                  // L1 文件数
-  uint64_t minor_compact_count;     // Minor Compaction 触发总次数
+  size_t mem_count;                  // 活跃内存条数
+  size_t imm_count;                  // 待落盘内存条数
+  size_t l0_count;                   // L0 文件数
+  size_t l1_count;                   // L1 文件数
+  uint64_t minor_compact_count;      // Minor Compaction 触发总次数
   long long last_minor_duration_ms;  // 最近一次 Minor Compaction 耗时 (ms)
 };
 

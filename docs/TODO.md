@@ -66,13 +66,13 @@
   - [x] 写串行 + 多读并发边界文档化
   - [x] `Put/Get/NewIterator/Compact` 锁顺序统一（避免死锁）
   - [x] 将当前 compaction 入口大锁细化为关键区段锁
-- [ ] 后台化落盘流程（先做最小闭环）
-  - [ ] `imm_` 后台 flush（minor compaction）
-  - [ ] flush 期间前台写入仅在 mem/imm 切换点短暂阻塞
-  - [ ] major compaction 保持手动/同步触发（本轮不引入额外后台线程）
-- [ ] 后台任务可观测
-  - [ ] flush/compaction 触发次数与耗时
-  - [ ] mem/imm 状态与 L0/L1 文件数指标
+- [x] 后台化落盘流程（先做最小闭环）
+  - [x] `imm_` 后台 flush（minor compaction）
+  - [x] flush 期间前台写入仅在 mem/imm 切换点短暂阻塞
+  - [x] major compaction 保持手动/同步触发（本轮不引入额外后台线程）
+- [x] 后台任务可观测
+  - [x] flush/compaction 触发次数与耗时
+  - [x] mem/imm 状态与 L0/L1 文件数指标
 
 ## Phase 4 - 网络服务主线（一步到位）
 - [ ] 服务层边界
