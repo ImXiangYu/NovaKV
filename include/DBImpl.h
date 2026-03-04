@@ -5,8 +5,10 @@
 #ifndef NOVAKV_DBIMPL_H
 #define NOVAKV_DBIMPL_H
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -17,6 +19,15 @@
 #include "MemTable.h"
 #include "RecoveryLoader.h"
 #include "SSTableReader.h"
+
+struct DBStatus {
+  size_t mem_count;                 // 活跃内存条数
+  size_t imm_count;                 // 待落盘内存条数
+  size_t l0_count;                  // L0 文件数
+  size_t l1_count;                  // L1 文件数
+  uint64_t minor_compact_count;     // Minor Compaction 触发总次数
+  long long last_minor_duration_ms;  // 最近一次 Minor Compaction 耗时 (ms)
+};
 
 class DBImpl {
  public:
@@ -33,6 +44,9 @@ class DBImpl {
 
   // 显式等待所有后台任务完成
   void Sync();
+
+  // 获取当前状态
+  DBStatus GetStatus() const;
 
  private:
   void MinorCompaction();
@@ -57,6 +71,10 @@ class DBImpl {
   uint64_t active_wal_id_ = 0;
   // imm_对应的WAL ID
   uint64_t imm_wal_id_ = 0;
+
+  // 可观测性指标
+  std::atomic<uint64_t> minor_compact_count_{0};
+  std::atomic<long long> last_minor_duration_ms_{0};
 
   // 写串行
   std::mutex write_mu_;

@@ -47,6 +47,21 @@ static void BenchPut(benchmark::State& state) {
   PrepareDbDir();
   DBImpl db(kBenchDir);
 
+  // 启动后台监控线程（漂亮的状态输出）
+  std::atomic<bool> quit{false};
+  std::thread monitor([&db, &quit]() {
+    while (!quit) {
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+      auto s = db.GetStatus();
+      printf(
+          "\n[STAT] Mem:%zu | Imm:%zu | L0:%zu | L1:%zu | MinorCount:%lu | "
+          "LastMinor:%lldms\n",
+          s.mem_count, s.imm_count, s.l0_count, s.l1_count,
+          s.minor_compact_count, s.last_minor_duration_ms);
+      fflush(stdout);
+    }
+  });
+
   const std::string value(128, 'v');
   int64_t i = 0;
   for (auto _ : state) {
@@ -54,6 +69,9 @@ static void BenchPut(benchmark::State& state) {
     benchmark::DoNotOptimize(key);
     PutValue(db, key, value);
   }
+
+  quit = true;
+  if (monitor.joinable()) monitor.join();
 
   state.SetItemsProcessed(state.iterations());
 }

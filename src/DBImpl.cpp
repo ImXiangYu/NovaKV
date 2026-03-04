@@ -104,7 +104,16 @@ void DBImpl::MinorCompaction() {
     ctx.old_wal_path = db_path_ + "/" + std::to_string(ctx.old_wal_id) + ".wal";
   }
 
-  SSTableReader* reader = compaction_engine_.BuildMinorSST(ctx);
+  SSTableReader* reader = nullptr;
+  {
+    auto start = std::chrono::steady_clock::now();
+    reader = compaction_engine_.BuildMinorSST(ctx);
+    auto end = std::chrono::steady_clock::now();
+    last_minor_duration_ms_ =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+            .count();
+    minor_compact_count_++;
+  }
 
   bool trigger_l0_to_l1 = false;
   if (reader != nullptr) {
@@ -294,8 +303,8 @@ void DBImpl::Put(const std::string& key, const ValueRecord& value) {
 
   {
     std::unique_lock state_lock(state_mu_);
-    // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
-    while (mem_->Count() >= 1000) {
+    // 1. 检查当前 MemTable 是否已满 (假设阈值为 10000 条)
+    while (mem_->Count() >= 10000) {
       if (imm_ != nullptr) {
         bg_cv_.wait(state_lock);
       } else {
@@ -320,4 +329,16 @@ void DBImpl::Put(const std::string& key, const ValueRecord& value) {
 
   // 2. 正常写入
   mem_->Put(key, value);
+}
+
+DBStatus DBImpl::GetStatus() const {
+  std::shared_lock state_lock(state_mu_);
+  DBStatus s;
+  s.mem_count = mem_ ? mem_->Count() : 0;
+  s.imm_count = imm_ ? imm_->Count() : 0;
+  s.l0_count = levels_[0].size();
+  s.l1_count = levels_[1].size();
+  s.minor_compact_count = minor_compact_count_.load();
+  s.last_minor_duration_ms = last_minor_duration_ms_.load();
+  return s;
 }
