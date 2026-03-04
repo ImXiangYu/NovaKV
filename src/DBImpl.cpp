@@ -46,6 +46,9 @@ DBImpl::DBImpl(std::string db_path)
 
   recovery_loader_.RecoverFromWals(mem_);
 
+  // 构造函数最后启动后台进程
+  background_thread_ = std::thread(&DBImpl::BackgroundLoop, this);
+
   LOG_INFO(std::string("SSTs & WALs Recovery complete. Items in memory: ") +
            std::to_string(mem_->Count()));
 }
@@ -111,6 +114,13 @@ void DBImpl::MinorCompaction() {
   if (need_l0_compact) {
     CompactL0ToL1();
   }
+}
+void DBImpl::BackgroundLoop() {
+  while(!bg_stopped_) {
+    bg_cv_.wait(state_mu_);
+  }
+  // 醒来后提醒
+  LOG_INFO("Background compaction triggered");
 }
 
 void DBImpl::CompactL0ToL1() {

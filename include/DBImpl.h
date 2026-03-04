@@ -33,6 +33,8 @@ class DBImpl {
 
  private:
   void MinorCompaction();
+  // 后台进程
+  void BackgroundLoop();
 
   std::string db_path_;
   ManifestManager manifest_manager_;
