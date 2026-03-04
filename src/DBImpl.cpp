@@ -241,22 +241,22 @@ bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
 void DBImpl::Put(const std::string& key, const ValueRecord& value) {
   std::lock_guard write_lock(write_mu_);
 
-  bool need_minor_compaction = false;
   {
     std::unique_lock state_lock(state_mu_);
     // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
-    if (mem_->Count() >= 1000) {
+    while (mem_->Count() >= 1000) {
       if (imm_ != nullptr) {
         // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
         // 后期我们会用后台线程来优化这里
         LOG_WARN("Wait: MinorCompaction is too slow...");
+        bg_cv_.wait(state_lock);
+      } else {
+        // 此时 imm_ 为空，我们可以安全地切换
+        bg_compaction_scheduled_ = true;
+        bg_cv_.notify_all();
+        break;
       }
-      need_minor_compaction = true;
     }
-  }
-  // 把耗时的Compaction放在锁外，避免锁的等待时间过长
-  if (need_minor_compaction) {
-    MinorCompaction();
   }
 
   // 2. 正常写入

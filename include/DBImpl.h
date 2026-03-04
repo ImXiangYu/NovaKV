@@ -5,10 +5,11 @@
 #ifndef NOVAKV_DBIMPL_H
 #define NOVAKV_DBIMPL_H
 
+#include <condition_variable>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
-#include <optional>
 
 #include "CompactionEngine.h"
 #include "DBIterator.h"
@@ -52,9 +53,17 @@ class DBImpl {
 
   // 写串行
   std::mutex write_mu_;
-
   // 全局状态共享锁
   mutable std::shared_mutex state_mu_;
+
+  // 后台线程，用于MinorCompaction
+  std::thread background_thread_;
+  // cv，用来通知后台进程干活
+  std::condition_variable_any bg_cv_;
+  // 停止标志位，析构时用
+  bool bg_stopped_;
+  // 一个简单的标志位，表示是否有落盘任务待处理
+  bool bg_compaction_scheduled_;
 };
 
 #endif  // NOVAKV_DBIMPL_H
