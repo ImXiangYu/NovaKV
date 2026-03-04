@@ -43,6 +43,7 @@
 build/
 bin/
 obj/
+cmake-build-debug/
 
 .vscode/
 .idea/
