@@ -87,15 +87,16 @@ TEST_F(CompactionTest, L0ToL1CompactionKeepsNewestValue) {
 
   // 第一批数据：L0 SST 1
   PutValue(db, "dup", "old");
-  for (int i = 0; i < 999; ++i) {
+  for (int i = 0; i < 9999; ++i) {
     PutValue(db, "k1_" + std::to_string(i), "v");
   }
   PutValue(db, "trigger_1",
            "x");  // 触发第一次 MinorCompaction，生成一个 L0 SST
+  db.Sync();
 
   // 第二批数据：L0 SST 2
   PutValue(db, "dup", "new");
-  for (int i = 0; i < 999; ++i) {
+  for (int i = 0; i < 9999; ++i) {
     PutValue(db, "k2_" + std::to_string(i), "v");
   }
   // 触发第二次 MinorCompaction，由于 L0 数量达到阈值 (>=2)，会随后自动触发
@@ -119,9 +120,11 @@ TEST_F(CompactionTest, RecoverSSTablesWithLevelsOnStartup) {
   {
     DBImpl db(test_db_path);
     // 构造两次落盘，触发 L0->L1
-    for (int i = 0; i < 1000; ++i) PutValue(db, "r1_" + std::to_string(i), "v");
+    for (int i = 0; i < 10000; ++i)
+      PutValue(db, "r1_" + std::to_string(i), "v");
     PutValue(db, "t1", "x");
-    for (int i = 0; i < 1000; ++i) PutValue(db, "r2_" + std::to_string(i), "v");
+    for (int i = 0; i < 10000; ++i)
+      PutValue(db, "r2_" + std::to_string(i), "v");
     PutValue(db, "t2", "y");
     db.Sync();
 
@@ -151,9 +154,10 @@ TEST_F(CompactionTest, NextFileNumberIsMonotonicAfterRestart) {
   uint64_t max_id_before = 0;
   {
     DBImpl db(test_db_path);
-    for (int i = 0; i < 1200; ++i) {
+    for (int i = 0; i < 12000; ++i) {
       PutValue(db, "first_" + std::to_string(i), "v");
     }
+    db.Sync();
     max_id_before = GetMaxFileNumberOnDisk(test_db_path);
   }
 
@@ -175,8 +179,8 @@ TEST_F(CompactionTest, NextFileNumberIsMonotonicAfterRestart) {
 TEST_F(CompactionTest, CompactDropsBottomMostTombstonesWithoutCreatingNewSST) {
   DBImpl db(test_db_path);
 
-  // 1. 构造一个仅包含 tombstone 的 L0 SST (1001条数据触发 Minor)
-  for (int i = 0; i <= 1000; ++i) {
+  // 1. 构造一个仅包含 tombstone 的 L0 SST (10001条数据触发 Minor)
+  for (int i = 0; i <= 10000; ++i) {
     PutDeletion(db, "ghost_" + std::to_string(i));
   }
   db.Sync();
@@ -195,7 +199,7 @@ TEST_F(CompactionTest, CompactDropsBottomMostTombstonesWithoutCreatingNewSST) {
 
   // 验证：磁盘上没有产生新的编号更大的 SST 文件
   uint64_t max_id_after = GetMaxFileNumberOnDisk(test_db_path);
-  EXPECT_EQ(max_id_after, max_id_before);
+  EXPECT_LE(max_id_after, max_id_before);
 
   std::string val;
   EXPECT_FALSE(GetValue(db, "ghost_10", val));

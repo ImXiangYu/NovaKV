@@ -25,13 +25,12 @@ void PutDeletion(DBImpl& db, const std::string& key) {
 }
 
 void ForceMinorCompaction(DBImpl& db, const std::string& prefix) {
-  for (int i = 0; i < 1000; ++i) {
+  for (int i = 0; i < 10000; ++i) {
     PutValue(db, prefix + "_fill_" + std::to_string(i), "v");
   }
   PutValue(db, prefix + "_trigger", "x");
   db.Sync();
 }
-
 bool GetValue(const DBImpl& db, const std::string& key, std::string& value) {
   ValueRecord record{ValueType::kValue, ""};
   if (!db.Get(key, record)) {
@@ -149,11 +148,11 @@ TEST_F(DBImplTest, MixedLayerSearch) {
 
   // 第一步：写入足够多数据，触发一次 Minor Compaction，生成 SST
   // 假设你的阈值调小了，或者我们写入大量数据
-  for (int i = 0; i < 500; i++) {
+  for (int i = 0; i < 5000; i++) {
     PutValue(db, "old_" + std::to_string(i), "v" + std::to_string(i));
   }
-  // 写入第 1001 条触发落盘
-  for (int i = 500; i < 1001; i++) {
+  // 写入第 10001 条触发落盘
+  for (int i = 5000; i < 10001; i++) {
     PutValue(db, "old_" + std::to_string(i), "v" + std::to_string(i));
   }
   db.Sync();
@@ -178,7 +177,7 @@ TEST_F(DBImplTest, LargeValueCompaction) {
   PutValue(db, "large_key", large_val);
 
   // 再次写入触发落盘
-  for (int i = 0; i < 1000; i++) {
+  for (int i = 0; i < 10000; i++) {
     PutValue(db, "fill_" + std::to_string(i), "data");
   }
   db.Sync();
@@ -194,14 +193,14 @@ TEST_F(DBImplTest, NewestSSTableWins) {
   DBImpl db(test_db_path);
 
   PutValue(db, "dup", "old");
-  for (int i = 0; i < 999; ++i) {
+  for (int i = 0; i < 9999; ++i) {
     PutValue(db, "k1_" + std::to_string(i), "v");
   }
   PutValue(db, "trigger_1", "x");  // 触发第一次 MinorCompaction
   db.Sync();
 
   PutValue(db, "dup", "new");
-  for (int i = 0; i < 999; ++i) {
+  for (int i = 0; i < 9999; ++i) {
     PutValue(db, "k2_" + std::to_string(i), "v");
   }
   PutValue(db, "trigger_2", "y");  // 触发第二次 MinorCompaction

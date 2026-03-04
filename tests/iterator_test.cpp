@@ -23,13 +23,12 @@ void PutDeletion(DBImpl& db, const std::string& key) {
 }
 
 void ForceMinorCompaction(DBImpl& db, const std::string& prefix) {
-  for (int i = 0; i < 1000; ++i) {
+  for (int i = 0; i < 10000; ++i) {
     PutValue(db, prefix + "_fill_" + std::to_string(i), "v");
   }
   PutValue(db, prefix + "_trigger", "x");
   db.Sync();
 }
-
 std::vector<std::pair<std::string, std::string>> CollectFrom(
     DBImpl& db, const std::string& start_key) {
   std::vector<std::pair<std::string, std::string>> out;
