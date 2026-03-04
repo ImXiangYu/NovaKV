@@ -191,3 +191,24 @@ BenchPut       194892 ns        18869 ns        40472 items_per_second=52.9984k/
 BenchGet         1460 ns         1335 ns       499907 items_per_second=748.867k/s
 ```
 
+存储核心路径（WAL/SST/MemTable）逻辑行为保持不变，但内部调用链已重组为组件化模式，且锁粒度从“全局入口锁”演进为“关键区段锁”；本次测试旨在验
+证重构后的性能稳定性，预期单线程 Put/Get QPS 无结构性波动，并为后续引入后台 Flush 流程提供高纯净度的性能基线。
+
+```text
+2026-03-04T10:54:09+08:00
+Running /mnt/d/GithubProjects/NovaKV/cmake-build-debug/nova_bench
+Run on (20 X 2688 MHz CPU s)
+CPU Caches:
+  L1 Data 48 KiB (x10)
+  L1 Instruction 32 KiB (x10)
+  L2 Unified 1280 KiB (x10)
+  L3 Unified 24576 KiB (x1)
+Load Average: 0.46, 0.45, 0.24
+***WARNING*** ASLR is enabled, the results may have unreproducible noise in them.
+***WARNING*** Library was built as DEBUG. Timings may be affected.
+---------------------------------------------------------------------
+Benchmark           Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------
+BenchPut       251371 ns        20765 ns        10000 items_per_second=48.1579k/s
+BenchGet         1284 ns         1236 ns       537892 items_per_second=809.154k/s
+```
