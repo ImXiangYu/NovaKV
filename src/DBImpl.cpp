@@ -93,7 +93,7 @@ void DBImpl::MinorCompaction() {
   {
     std::unique_lock state_lock(state_mu_);
 
-    if (imm_ == nullptr) return; // imm是空的，无需执行MinorCompaction
+    if (imm_ == nullptr) return;  // imm是空的，无需执行MinorCompaction
 
     ctx.flushing_imm = imm_;
     ctx.new_sst_id = manifest_manager_.AllocateFileNumber();
@@ -138,18 +138,19 @@ void DBImpl::MinorCompaction() {
 void DBImpl::BackgroundLoop() {
   while (true) {
     std::unique_lock state_lock(state_mu_);
-    bg_cv_.wait(state_lock, [this] { return bg_stopped_ || bg_compaction_scheduled_; });
+    bg_cv_.wait(state_lock,
+                [this] { return bg_stopped_ || bg_compaction_scheduled_; });
 
     if (bg_stopped_) break;
 
     // 此时拿到了锁，且 bg_compaction_scheduled_ 为 true
     // 既然已经拿到锁了，我们可以执行 MinorCompaction
-    state_lock.unlock(); // 先放锁，让 MinorCompaction 内部自己控锁
+    state_lock.unlock();  // 先放锁，让 MinorCompaction 内部自己控锁
     MinorCompaction();
-    state_lock.lock(); // 干完活再拿回锁，重置状态
+    state_lock.lock();  // 干完活再拿回锁，重置状态
 
     bg_compaction_scheduled_ = false;
-    bg_cv_.notify_all(); // 通知前台Compaction完成
+    bg_cv_.notify_all();  // 通知前台Compaction完成
   }
   // 醒来后提醒
   LOG_INFO("Background compaction triggered");
@@ -295,7 +296,8 @@ void DBImpl::Put(const std::string& key, const ValueRecord& value) {
         imm_ = mem_;
         // 创建新 WAL 和新 MemTable (这部分很快，可以在锁内做)
         uint64_t new_wal_id = manifest_manager_.AllocateFileNumber();
-        std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
+        std::string new_wal =
+            db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
         mem_ = new MemTable(new_wal);
         active_wal_id_ = new_wal_id;
         manifest_manager_.AddWal(new_wal_id);
