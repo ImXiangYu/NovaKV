@@ -94,7 +94,7 @@ void DBImpl::MinorCompaction() {
   {
     std::unique_lock state_lock(state_mu_);
 
-    // if (imm_ == nullptr) return;  // imm是空的，无需执行MinorCompaction
+    if (imm_ == nullptr) return;  // imm是空的，无需执行MinorCompaction
 
     ctx.flushing_imm = imm_;
     ctx.new_sst_id = manifest_manager_.AllocateFileNumber();

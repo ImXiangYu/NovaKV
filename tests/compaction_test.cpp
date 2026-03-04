@@ -101,6 +101,7 @@ TEST_F(CompactionTest, L0ToL1CompactionKeepsNewestValue) {
   // 触发第二次 MinorCompaction，由于 L0 数量达到阈值 (>=2)，会随后自动触发
   // L0->L1
   PutValue(db, "trigger_2", "y");
+  db.Sync();
 
   // 验证层级状态
   EXPECT_EQ(db.LevelSize(0), 0u);
@@ -122,6 +123,7 @@ TEST_F(CompactionTest, RecoverSSTablesWithLevelsOnStartup) {
     PutValue(db, "t1", "x");
     for (int i = 0; i < 1000; ++i) PutValue(db, "r2_" + std::to_string(i), "v");
     PutValue(db, "t2", "y");
+    db.Sync();
 
     ASSERT_EQ(db.LevelSize(1), 1u);
   }
@@ -177,6 +179,7 @@ TEST_F(CompactionTest, CompactDropsBottomMostTombstonesWithoutCreatingNewSST) {
   for (int i = 0; i <= 1000; ++i) {
     PutDeletion(db, "ghost_" + std::to_string(i));
   }
+  db.Sync();
 
   ASSERT_EQ(db.LevelSize(0), 1u);
   ASSERT_EQ(db.LevelSize(1), 0u);
