@@ -238,9 +238,8 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
 }
 void DBImpl::Sync() {
   std::unique_lock state_lock(state_mu_);
-  bg_cv_.wait(state_lock, [this] {
-    return imm_ == nullptr && !bg_compaction_scheduled_;
-  });
+  bg_cv_.wait(state_lock,
+              [this] { return imm_ == nullptr && !bg_compaction_scheduled_; });
 }
 
 bool DBImpl::Get(const std::string& key, ValueRecord& value) const {
