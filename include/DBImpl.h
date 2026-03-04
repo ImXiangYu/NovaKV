@@ -31,6 +31,9 @@ class DBImpl {
   // 迭代器
   std::unique_ptr<DBIterator> NewIterator();
 
+  // 显式等待所有后台任务完成
+  void Sync();
+
  private:
   void MinorCompaction();
   // 后台进程

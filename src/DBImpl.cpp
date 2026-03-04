@@ -70,6 +70,7 @@ DBImpl::~DBImpl() {
   if (mem_ != nullptr && mem_->Count() > 0) {
     // 此时已经是单线程了，直接手动把 mem 换给 imm 调一次 MinorCompaction 即可
     imm_ = mem_;
+    imm_wal_id_ = active_wal_id_;
     mem_ = nullptr;
     MinorCompaction();
   }
@@ -93,7 +94,7 @@ void DBImpl::MinorCompaction() {
   {
     std::unique_lock state_lock(state_mu_);
 
-    if (imm_ == nullptr) return;  // imm是空的，无需执行MinorCompaction
+    // if (imm_ == nullptr) return;  // imm是空的，无需执行MinorCompaction
 
     ctx.flushing_imm = imm_;
     ctx.new_sst_id = manifest_manager_.AllocateFileNumber();
@@ -101,15 +102,11 @@ void DBImpl::MinorCompaction() {
 
     ctx.old_wal_id = imm_wal_id_;
     ctx.old_wal_path = db_path_ + "/" + std::to_string(ctx.old_wal_id) + ".wal";
-
-    if (!compaction_engine_.PrepareMinor(mem_, imm_, active_wal_id_, ctx)) {
-      LOG_ERROR("DBImpl::MinorCompaction aborted: PrepareMinor failed.");
-      return;
-    }
   }
 
   SSTableReader* reader = compaction_engine_.BuildMinorSST(ctx);
 
+  bool trigger_l0_to_l1 = false;
   if (reader != nullptr) {
     std::unique_lock state_lock(state_mu_);
 
@@ -129,10 +126,16 @@ void DBImpl::MinorCompaction() {
 
     // 检查是否触发 L0->L1
     if (levels_[0].size() >= 2) {
-      CompactL0ToL1();
+      // CompactL0ToL1();
+      trigger_l0_to_l1 = true;
     }
   } else {
     LOG_ERROR("Background Minor Compaction failed to build SST.");
+  }
+
+  if (trigger_l0_to_l1) {
+    // 触发 L0->L1
+    CompactL0ToL1();
   }
 }
 void DBImpl::BackgroundLoop() {
@@ -232,6 +235,12 @@ std::unique_ptr<DBIterator> DBImpl::NewIterator() {
   }
 
   return std::make_unique<DBIterator>(std::move(rows));
+}
+void DBImpl::Sync() {
+  std::unique_lock state_lock(state_mu_);
+  bg_cv_.wait(state_lock, [this] {
+    return imm_ == nullptr && !bg_compaction_scheduled_;
+  });
 }
 
 bool DBImpl::Get(const std::string& key, ValueRecord& value) const {

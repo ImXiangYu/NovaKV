@@ -212,3 +212,14 @@ Benchmark           Time             CPU   Iterations UserCounters...
 BenchPut       251371 ns        20765 ns        10000 items_per_second=48.1579k/s
 BenchGet         1284 ns         1236 ns       537892 items_per_second=809.154k/s
 ```
+
+成功引入 “前台闪电切换 + 后台异步落盘” 架构。写路径（Put）现已实现 I/O 解耦：当 MemTable 满时，前台线程仅需原子级切换至
+Immutable
+MemTable 并触发后台任务即可返回，无需等待磁盘 I/O。后台线程采用 “三段锁” 策略执行 Minor Compaction，最大限度释放了 Get 与
+Put
+的并发空间。本次测试旨在验证异步化后的吞吐量上限与长尾延迟（P99）表现，预期写性能将有显著增幅，且 QPS 波动曲线将由于 I/O
+停顿的消除而趋于平滑。
+
+```text
+
+```
