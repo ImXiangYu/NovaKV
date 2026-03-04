@@ -116,7 +116,7 @@ void DBImpl::MinorCompaction() {
   }
 }
 void DBImpl::BackgroundLoop() {
-  while(!bg_stopped_) {
+  while (!bg_stopped_) {
     bg_cv_.wait(state_mu_);
   }
   // 醒来后提醒
