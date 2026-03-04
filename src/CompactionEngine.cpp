@@ -259,7 +259,7 @@ bool CompactionEngine::InstallMinor(MemTable*& mem, MemTable*& imm,
 
   const uint64_t new_wal_id = manifest_manager_.AllocateFileNumber();
   std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
-  MemTable* new_mem = new (std::nothrow) MemTable(new_wal);
+  auto* new_mem = new (std::nothrow) MemTable(new_wal);
   if (new_mem == nullptr) {
     LOG_ERROR(
         std::string("InstallMinor failed: cannot allocate MemTable for ") +
