@@ -167,35 +167,6 @@ bool CompactionEngine::HasVisibleValueInL1(const std::string& key) const {
   return false;
 }
 
-bool CompactionEngine::PrepareMinor(MemTable*& mem, MemTable*& imm,
-                                    uint64_t& active_wal_id,
-                                    MinorCtx& ctx) const {
-  if (mem == nullptr) {
-    LOG_ERROR("PrepareMinor failed: mem is null.");
-    return false;
-  }
-  if (imm != nullptr) {
-    LOG_ERROR("PrepareMinor failed: imm already exists.");
-    return false;
-  }
-  LOG_INFO("Minor Compaction start.");
-  const uint64_t old_wal_id = active_wal_id;
-  std::string old_wal_path = mem->GetWalPath();
-
-  imm = mem;
-  LOG_INFO(std::string("Immutable MemTable items: ") +
-           std::to_string(imm->Count()));
-
-  const uint64_t new_sst_id = manifest_manager_.AllocateFileNumber();
-  std::string sst_path = db_path_ + "/" + std::to_string(new_sst_id) + ".sst";
-  ctx.flushing_imm = imm;
-  ctx.new_sst_id = new_sst_id;
-  ctx.new_sst_path = sst_path;
-  ctx.old_wal_id = old_wal_id;
-  ctx.old_wal_path = old_wal_path;
-  return true;
-}
-
 SSTableReader* CompactionEngine::BuildMinorSST(const MinorCtx& ctx) const {
   if (ctx.flushing_imm == nullptr) {
     LOG_ERROR("BuildMinorSST failed: flushing_imm is null.");
@@ -233,64 +204,3 @@ SSTableReader* CompactionEngine::BuildMinorSST(const MinorCtx& ctx) const {
   return reader;
 }
 
-bool CompactionEngine::InstallMinor(MemTable*& mem, MemTable*& imm,
-                                    uint64_t& active_wal_id,
-                                    const MinorCtx& ctx, SSTableReader* reader,
-                                    bool& need_l0_compact) const {
-  if (mem == nullptr) {
-    LOG_ERROR("InstallMinor failed: mem is null.");
-    return false;
-  }
-  if (ctx.flushing_imm == nullptr) {
-    LOG_ERROR("InstallMinor failed: flushing_imm is null.");
-    return false;
-  }
-  if (reader == nullptr) {
-    LOG_ERROR("InstallMinor failed: reader is null.");
-    return false;
-  }
-  if (imm != ctx.flushing_imm) {
-    LOG_ERROR("InstallMinor failed: imm does not match flushing_imm.");
-    return false;
-  }
-
-  levels_[0].push_back(reader);
-  manifest_manager_.AddSst(ctx.new_sst_id, 0);
-
-  const uint64_t new_wal_id = manifest_manager_.AllocateFileNumber();
-  std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
-  auto* new_mem = new (std::nothrow) MemTable(new_wal);
-  if (new_mem == nullptr) {
-    LOG_ERROR(
-        std::string("InstallMinor failed: cannot allocate MemTable for ") +
-        new_wal);
-    levels_[0].pop_back();
-    manifest_manager_.RemoveSst(ctx.new_sst_id);
-    fs::remove(ctx.new_sst_path);
-    return false;
-  }
-
-  active_wal_id = new_wal_id;
-  mem = new_mem;
-  if (!manifest_manager_.AddWal(new_wal_id)) {
-    LOG_ERROR(std::string("InstallMinor warning: AddWal failed for wal id ") +
-              std::to_string(new_wal_id));
-  }
-
-  if (fs::exists(ctx.old_wal_path) && fs::remove(ctx.old_wal_path)) {
-    if (!manifest_manager_.RemoveWal(ctx.old_wal_id)) {
-      LOG_ERROR(
-          std::string("InstallMinor warning: RemoveWal failed for wal id ") +
-          std::to_string(ctx.old_wal_id));
-    }
-    LOG_INFO(std::string("Removed old wal file: ") + ctx.old_wal_path);
-  } else {
-    LOG_ERROR(std::string("InstallMinor warning: old WAL remove failed: ") +
-              ctx.old_wal_path);
-  }
-
-  need_l0_compact = levels_[0].size() >= 2;
-  delete imm;
-  imm = nullptr;
-  return true;
-}
