@@ -52,6 +52,8 @@ class DBImpl {
 
   // 维护active_wal_id_
   uint64_t active_wal_id_ = 0;
+  // imm_对应的WAL ID
+  uint64_t imm_wal_id_ = 0;
 
   // 写串行
   std::mutex write_mu_;

@@ -18,7 +18,9 @@ DBImpl::DBImpl(std::string db_path)
       manifest_manager_(db_path_),
       levels_(2),
       compaction_engine_(db_path_, manifest_manager_, levels_),
-      recovery_loader_(db_path_, manifest_manager_, levels_) {
+      recovery_loader_(db_path_, manifest_manager_, levels_),
+      bg_stopped_(false),
+      bg_compaction_scheduled_(false) {
   // 1. 确保工作目录存在
   if (!fs::exists(db_path_)) {
     fs::create_directories(db_path_);
@@ -54,8 +56,21 @@ DBImpl::DBImpl(std::string db_path)
 }
 
 DBImpl::~DBImpl() {
+  // 先停掉后台线程
+  {
+    std::unique_lock state_lock(state_mu_);
+    bg_stopped_ = true;
+    bg_cv_.notify_all();
+  }
+  if (background_thread_.joinable()) {
+    background_thread_.join();
+  }
+
   // 析构前最后落盘一次，保证数据不丢
-  if (mem_->Count() > 0) {
+  if (mem_ != nullptr && mem_->Count() > 0) {
+    // 此时已经是单线程了，直接手动把 mem 换给 imm 调一次 MinorCompaction 即可
+    imm_ = mem_;
+    mem_ = nullptr;
     MinorCompaction();
   }
 
@@ -77,6 +92,16 @@ void DBImpl::MinorCompaction() {
   CompactionEngine::MinorCtx ctx;
   {
     std::unique_lock state_lock(state_mu_);
+
+    if (imm_ == nullptr) return; // imm是空的，无需执行MinorCompaction
+
+    ctx.flushing_imm = imm_;
+    ctx.new_sst_id = manifest_manager_.AllocateFileNumber();
+    ctx.new_sst_path = db_path_ + "/" + std::to_string(ctx.new_sst_id) + ".sst";
+
+    ctx.old_wal_id = imm_wal_id_;
+    ctx.old_wal_path = db_path_ + "/" + std::to_string(ctx.old_wal_id) + ".wal";
+
     if (!compaction_engine_.PrepareMinor(mem_, imm_, active_wal_id_, ctx)) {
       LOG_ERROR("DBImpl::MinorCompaction aborted: PrepareMinor failed.");
       return;
@@ -84,40 +109,47 @@ void DBImpl::MinorCompaction() {
   }
 
   SSTableReader* reader = compaction_engine_.BuildMinorSST(ctx);
-  if (reader == nullptr) {
-    std::unique_lock state_lock(state_mu_);
-    // Prepare 成功后会设置 imm_=mem_；若 Build 失败需要回滚，避免双指针悬挂
-    if (imm_ == ctx.flushing_imm && mem_ == ctx.flushing_imm) {
-      imm_ = nullptr;
-    }
-    LOG_ERROR("DBImpl::MinorCompaction aborted: BuildMinorSST failed.");
-    return;
-  }
 
-  bool need_l0_compact = false;
-  bool install_ok = false;
-  {
+  if (reader != nullptr) {
     std::unique_lock state_lock(state_mu_);
-    install_ok = compaction_engine_.InstallMinor(mem_, imm_, active_wal_id_,
-                                                 ctx, reader, need_l0_compact);
-    if (!install_ok) {
-      // Install 失败时 reader 仍由调用方清理
-      delete reader;
-      if (imm_ == ctx.flushing_imm && mem_ == ctx.flushing_imm) {
-        imm_ = nullptr;
-      }
-      LOG_ERROR("DBImpl::MinorCompaction aborted: InstallMinor failed.");
-      return;
-    }
-  }
 
-  if (need_l0_compact) {
-    CompactL0ToL1();
+    // 更新磁盘元数据 (拿锁)
+    levels_[0].push_back(reader);
+    manifest_manager_.AddSst(ctx.new_sst_id, 0);
+
+    // 清理：删掉旧 WAL，删掉旧内存
+    manifest_manager_.RemoveWal(ctx.old_wal_id);
+    std::filesystem::remove(ctx.old_wal_path);
+
+    delete imm_;
+    imm_ = nullptr;
+    imm_wal_id_ = 0;
+
+    LOG_INFO("Background Minor Compaction success.");
+
+    // 检查是否触发 L0->L1
+    if (levels_[0].size() >= 2) {
+      CompactL0ToL1();
+    }
+  } else {
+    LOG_ERROR("Background Minor Compaction failed to build SST.");
   }
 }
 void DBImpl::BackgroundLoop() {
-  while (!bg_stopped_) {
-    bg_cv_.wait(state_mu_);
+  while (true) {
+    std::unique_lock state_lock(state_mu_);
+    bg_cv_.wait(state_lock, [this] { return bg_stopped_ || bg_compaction_scheduled_; });
+
+    if (bg_stopped_) break;
+
+    // 此时拿到了锁，且 bg_compaction_scheduled_ 为 true
+    // 既然已经拿到锁了，我们可以执行 MinorCompaction
+    state_lock.unlock(); // 先放锁，让 MinorCompaction 内部自己控锁
+    MinorCompaction();
+    state_lock.lock(); // 干完活再拿回锁，重置状态
+
+    bg_compaction_scheduled_ = false;
+    bg_cv_.notify_all(); // 通知前台Compaction完成
   }
   // 醒来后提醒
   LOG_INFO("Background compaction triggered");
@@ -256,12 +288,19 @@ void DBImpl::Put(const std::string& key, const ValueRecord& value) {
     // 1. 检查当前 MemTable 是否已满 (假设阈值为 1000 条)
     while (mem_->Count() >= 1000) {
       if (imm_ != nullptr) {
-        // 如果上一个 imm_ 还没处理完，为了简单起见，这里先同步等待
-        // 后期我们会用后台线程来优化这里
-        LOG_WARN("Wait: MinorCompaction is too slow...");
         bg_cv_.wait(state_lock);
       } else {
         // 此时 imm_ 为空，我们可以安全地切换
+        imm_wal_id_ = active_wal_id_;
+        imm_ = mem_;
+        // 创建新 WAL 和新 MemTable (这部分很快，可以在锁内做)
+        uint64_t new_wal_id = manifest_manager_.AllocateFileNumber();
+        std::string new_wal = db_path_ + "/" + std::to_string(new_wal_id) + ".wal";
+        mem_ = new MemTable(new_wal);
+        active_wal_id_ = new_wal_id;
+        manifest_manager_.AddWal(new_wal_id);
+
+        // 唤醒后台
         bg_compaction_scheduled_ = true;
         bg_cv_.notify_all();
         break;
