@@ -86,7 +86,7 @@
 - [ ] 高并发网络引擎（epoll）
   - [ ] 基础 Server 搭建：Non-blocking Socket + bind/listen
   - [ ] epoll 循环：实现 Acceptor 处理新连接，IO 线程处理读写事件
-  - [ ] 连接上下文管理：为每个 Client 维护独立的读写缓冲区（Buffer）
+  - [x] 连接上下文管理：为每个 Client 维护独立的读写缓冲区（Buffer）
 - [ ] 线程池并发调度
   - [ ] 任务解耦：IO 线程仅负责收发，业务逻辑（DB 操作）丢入线程池
   - [ ] 结果回写：业务线程执行完后，将响应内容挂载至连接的写缓冲，由 epoll 触发发送
