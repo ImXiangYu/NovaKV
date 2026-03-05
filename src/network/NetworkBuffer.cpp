@@ -56,7 +56,10 @@ size_t NetworkBuffer::ReadFromFd(const int fd) {
 
   const size_t n = readv(fd, iov.data(), iov.size());
 
-  if (n <= WritableBytes()) {
+  if (n < 0) {
+    return 0;
+  }
+  if (static_cast<size_t>(n) <= WritableBytes()) {
     write_index_ += n;  // 全部读进 buffer_
   } else {
     write_index_ = buffer_.size();              // buffer_ 填满了
