@@ -16,6 +16,7 @@ set(NOVAKV_SOURCES
     src/WalHandler.cpp
     src/Logger.cpp
     src/DBIterator.cpp
+        src/network/NetworkBuffer.cpp
 )
 
 add_library(novakv_core ${NOVAKV_SOURCES})
