@@ -48,7 +48,7 @@ size_t NetworkBuffer::ReadFromFd(const int fd) {
   // 使用 iovec 将数据一次性读入 Buffer 的剩余空间
   // 如果 Buffer 不够，剩下的进 extra_buffer
 
-  std::vector<iovec> iov;
+  iovec iov[2];
   iov[0].iov_base = buffer_.data() + write_index_;
   iov[0].iov_len = WritableBytes();
   iov[1].iov_base = extra_buffer;
