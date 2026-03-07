@@ -4,6 +4,8 @@
 
 #include "network/RESPParser.h"
 
+#include <charconv>
+
 // 从 buffer 解析数据，存入 out_command
 ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
                               std::vector<std::string>& out_command) {
@@ -24,7 +26,14 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         }
         // 3. 提取数字，设置 array_size_
         // 提取*后的，crlf之前的
-        array_size_ = std::stoi(std::string(firstPos + 1, crlf));
+        auto [ptr, ec] = std::from_chars(firstPos + 1, crlf, array_size_);
+        if (ec == std::errc()) {
+          if (array_size_ == -1) {
+            // 特殊处理：Redis Null Bulk String
+          }
+        } else {
+          return ParseStatus::ERROR;
+        }
         // 4. 状态跳至 EXPECT_BULK_SIZE
         // 先Retrieve
         buffer->Retrieve(crlf - firstPos + 2);
@@ -40,11 +49,18 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         }
         // 2. 检查首字节是否为 $
         const char* firstPos = buffer->Peek();
-        if (firstPos == crlf || *firstPos != '*') {
+        if (firstPos == crlf || *firstPos != '$') {
           return ParseStatus::ERROR;
         }
         // 3. 提取长度 bulk_len_
-        bulk_len_ = std::stoi(std::string(firstPos + 1, crlf));
+        auto [ptr, ec] = std::from_chars(firstPos + 1, crlf, bulk_len_);
+        if (ec == std::errc()) {
+          if (bulk_len_ == -1) {
+            // 特殊处理：Redis Null Bulk String
+          }
+        } else {
+          return ParseStatus::ERROR;
+        }
         // 4. 状态跳至 EXPECT_BULK_DATA
         // 先Retrieve
         buffer->Retrieve(crlf - firstPos + 2);
@@ -62,12 +78,14 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         const char* firstPos = buffer->Peek();
         std::string_view view(firstPos, bulk_len_);
         out_command.emplace_back(view);
+        buffer->Retrieve(bulk_len_ + 2);
         // 3. 检查是否解析完所有参数，完事了就返回 SUCCESS
-        if (buffer->ReadableBytes() <= 0) {
+        if (out_command.size() == array_size_) {
           return ParseStatus::SUCCESS;
+        } else {
+          state_ = State::EXPECT_BULK_SIZE;
         }
         // 没结束就继续
-        buffer->Retrieve(bulk_len_ + 2);
         break;
       }
       default: {
