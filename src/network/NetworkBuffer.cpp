@@ -54,7 +54,7 @@ size_t NetworkBuffer::ReadFromFd(const int fd) {
   iov[1].iov_base = extra_buffer;
   iov[1].iov_len = sizeof(extra_buffer);
 
-  const size_t n = readv(fd, iov.data(), iov.size());
+  const size_t n = readv(fd, iov, 2);
 
   if (n < 0) {
     return 0;

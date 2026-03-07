@@ -17,6 +17,8 @@ set(NOVAKV_SOURCES
     src/Logger.cpp
     src/DBIterator.cpp
         src/network/NetworkBuffer.cpp
+        src/network/RESPParser.cpp
+        include/network/RESPParser.h
 )
 
 add_library(novakv_core ${NOVAKV_SOURCES})
