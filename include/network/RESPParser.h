@@ -35,7 +35,7 @@ class RESPParser {
 
  private:
   State state_;
-  int64_t  array_size_;  // 数组总元素数
+  int64_t array_size_;  // 数组总元素数
   int64_t bulk_len_;    // 当前正在解析的字符串长度
 };
 
