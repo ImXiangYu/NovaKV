@@ -10,6 +10,7 @@
 ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
                               std::vector<std::string>& out_command) {
   while (true) {
+    if (buffer->ReadableBytes() == 0) return ParseStatus::INCOMPLETE;
     switch (state_) {
       case State::EXPECT_ARRAY_SIZE: {
         // *2\r\n$3\r\nGET\r\n$1\r\na\r\n
@@ -21,7 +22,13 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         }
         // 2. 检查首字节是否为 *
         const char* firstPos = buffer->Peek();
-        if (firstPos == crlf || *firstPos != '*') {
+
+        if (firstPos == crlf) {
+          buffer->Retrieve(2);
+          continue;
+        }
+
+        if (*firstPos != '*') {
           return ParseStatus::ERROR;
         }
         // 3. 提取数字，设置 array_size_
@@ -52,7 +59,13 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         }
         // 2. 检查首字节是否为 $
         const char* firstPos = buffer->Peek();
-        if (firstPos == crlf || *firstPos != '$') {
+
+        if (firstPos == crlf) {
+          buffer->Retrieve(2);
+          continue;
+        }
+
+        if (*firstPos != '$') {
           return ParseStatus::ERROR;
         }
         // 3. 提取长度 bulk_len_
@@ -72,18 +85,17 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
       }
       case State::EXPECT_BULK_DATA: {
         // 1. 检查 buffer 可读字节是否够 bulk_len_ + 2 (\r\n)
-        if (buffer->ReadableBytes() < bulk_len_ + 2) {
+        if (buffer->ReadableBytes() < static_cast<size_t>(bulk_len_ + 2)) {
           // 数据不完整
           return ParseStatus::INCOMPLETE;
         }
         // 2. 提取数据，存入 out_command
         // 读出 bulk_len_ 个字节
         const char* firstPos = buffer->Peek();
-        std::string_view view(firstPos, bulk_len_);
-        out_command.emplace_back(view);
+        out_command.emplace_back(firstPos, static_cast<size_t>(bulk_len_));
         buffer->Retrieve(bulk_len_ + 2);
         // 3. 检查是否解析完所有参数，完事了就返回 SUCCESS
-        if (out_command.size() == array_size_) {
+        if (out_command.size() == static_cast<size_t>(array_size_)) {
           Reset();
           return ParseStatus::SUCCESS;
         } else {
