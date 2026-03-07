@@ -29,20 +29,20 @@ TEST_F(RESPParserTest, BasicSuccess) {
 TEST_F(RESPParserTest, PartialPacket) {
   std::vector<std::string> cmd;
 
-  // 第一段：只给个 *3\r
+  // 第一段：只给个 *3\r (长度 3，正确)
   buffer.Append("*3\r", 3);
   EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::INCOMPLETE);
 
-  // 第二段：补全 \n 和 $3\r\nSET
-  buffer.Append("\n$3\r\nSET", 7);
+  // 第二段：补全 \n 和 $3\r\nSET (实际长度是 8)
+  buffer.Append("\n$3\r\nSET", 8);
   EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::INCOMPLETE);
 
-  // 第三段：补全 \r\n 并给一半 key
-  buffer.Append("\r\n$3\r\nke", 7);
+  // 第三段：补全 \r\n 并给一半 key (实际长度是 8)
+  buffer.Append("\r\n$3\r\nke", 8);
   EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::INCOMPLETE);
 
-  // 第四段：最后补全所有
-  buffer.Append("y\r\n$5\r\nvalue\r\n", 13);
+  // 第四段：最后补全所有 (实际长度是 14)
+  buffer.Append("y\r\n$5\r\nvalue\r\n", 14);
   EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::SUCCESS);
 
   ASSERT_EQ(cmd.size(), 3);

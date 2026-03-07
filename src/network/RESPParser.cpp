@@ -73,6 +73,17 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         if (ec == std::errc()) {
           if (bulk_len_ == -1) {
             // 特殊处理：Redis Null Bulk String
+            buffer->Retrieve(crlf - firstPos + 2); // 领走 $-1\r\n
+            out_command.emplace_back("");          // 插入空字符串代表 Null
+
+            // 检查是否已经解析完所有参数
+            if (out_command.size() == static_cast<size_t>(array_size_)) {
+              Reset();
+              return ParseStatus::SUCCESS;
+            } else {
+              state_ = State::EXPECT_BULK_SIZE;
+              continue; // 必须 continue 重新循环，不能让它走到 EXPECT_BULK_DATA
+            }
           }
         } else {
           return ParseStatus::ERROR;
