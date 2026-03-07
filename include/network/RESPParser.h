@@ -35,8 +35,8 @@ class RESPParser {
 
  private:
   State state_;
-  size_t array_size_;  // 数组总元素数
-  size_t bulk_len_;    // 当前正在解析的字符串长度
+  long long array_size_;  // 数组总元素数
+  long long bulk_len_;    // 当前正在解析的字符串长度
 };
 
 #endif  // NOVAKV_RESPPARSER_H
