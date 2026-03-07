@@ -29,7 +29,7 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         auto [ptr, ec] = std::from_chars(firstPos + 1, crlf, array_size_);
         if (ec == std::errc()) {
           if (array_size_ <= 0) {
-            // 特殊处理：Redis Null Bulk String
+            // 特殊处理：空数组直接返回成功，并领走数据
             buffer->Retrieve(crlf - firstPos + 2);
             Reset();
             return ParseStatus::SUCCESS;

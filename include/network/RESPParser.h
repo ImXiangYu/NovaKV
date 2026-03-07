@@ -24,7 +24,7 @@ class RESPParser {
   };
   RESPParser()
       : state_(State::EXPECT_ARRAY_SIZE), array_size_(0), bulk_len_(0) {}
-  ~RESPParser();
+  ~RESPParser() = default;
 
   // 从 buffer 解析数据，存入 out_command
   ParseStatus Parse(NetworkBuffer* buffer,
