@@ -77,8 +77,8 @@
 ## Phase 4 - 网络服务主线（Redis 兼容版）
 
 - [ ] RESP 协议实现（暗号对接）
-  - [ ] 实现 RESP Parser：支持 `*` (数组) 和 `$` (大块字符串) 的状态机解析
-  - [ ] 解决“半包”问题：Parser 需支持断点续传，数据不足时保留状态
+  - [x] 实现 RESP Parser：支持 `*` (数组) 和 `$` (大块字符串) 的状态机解析
+  - [x] 解决“半包”问题：Parser 需支持断点续传，数据不足时保留状态
   - [ ] 实现 RESP Encoder：支持 `+OK`、`-ERR`、`$Bulk` 等响应格式
 - [ ] 命令分发层（Command Dispatcher）
   - [ ] 建立 `CommandExecutor`：将 `SET/GET/DEL/SCAN` 路由至 `DBImpl` 对应接口

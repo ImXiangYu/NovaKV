@@ -6,19 +6,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 统一核心库，避免重复列源文件
 set(NOVAKV_SOURCES
-    src/BlockBuilder.cpp
-    src/CompactionEngine.cpp
-    src/DBImpl.cpp
-    src/ManifestManager.cpp
-    src/RecoveryLoader.cpp
-    src/SSTableBuilder.cpp
-    src/SSTableReader.cpp
-    src/WalHandler.cpp
-    src/Logger.cpp
-    src/DBIterator.cpp
+        src/BlockBuilder.cpp
+        src/CompactionEngine.cpp
+        src/DBImpl.cpp
+        src/ManifestManager.cpp
+        src/RecoveryLoader.cpp
+        src/SSTableBuilder.cpp
+        src/SSTableReader.cpp
+        src/WalHandler.cpp
+        src/Logger.cpp
+        src/DBIterator.cpp
         src/network/NetworkBuffer.cpp
         src/network/RESPParser.cpp
-        include/network/RESPParser.h
+        src/network/RESPEncoder.cpp
 )
 
 add_library(novakv_core ${NOVAKV_SOURCES})
@@ -31,8 +31,8 @@ target_link_libraries(nova_test PRIVATE novakv_core)
 # --- 目标 2: Google Test 单元测试 ---
 include(FetchContent)
 FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/refs/heads/main.zip
+        googletest
+        URL https://github.com/google/googletest/archive/refs/heads/main.zip
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
@@ -41,8 +41,8 @@ FetchContent_MakeAvailable(googletest)
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
-  benchmark
-  URL https://github.com/google/benchmark/archive/refs/heads/main.zip
+        benchmark
+        URL https://github.com/google/benchmark/archive/refs/heads/main.zip
 )
 FetchContent_MakeAvailable(benchmark)
 
@@ -54,7 +54,7 @@ target_link_libraries(nova_bench PRIVATE novakv_core benchmark::benchmark)
 file(GLOB TEST_FILES "tests/*.cpp")
 
 # 2. 循环处理每一个文件，将其注册为独立的测试目标
-foreach(test_file ${TEST_FILES})
+foreach (test_file ${TEST_FILES})
     # 获取文件名（不带后缀），作为 Target 名字
     get_filename_component(test_name ${test_file} NAME_WE)
 
@@ -70,7 +70,7 @@ foreach(test_file ${TEST_FILES})
     add_test(NAME ${test_name} COMMAND ${test_name})
 
     message(STATUS "Created test target: ${test_name}")
-endforeach()
+endforeach ()
 
 # 启用 ctest 命令行工具
 enable_testing()
