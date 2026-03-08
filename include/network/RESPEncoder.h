@@ -68,6 +68,9 @@ class RESPEncoder {
    */
   static void EncodeArray(NetworkBuffer* buffer,
                           const std::vector<std::string>& elements);
+
+private:
+  constexpr static auto kCRLF = "\r\n";
 };
 
 #endif  // NOVAKV_RESPENCODER_H

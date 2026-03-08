@@ -6,57 +6,49 @@
 
 void RESPEncoder::EncodeSimpleString(NetworkBuffer* buffer,
                                      const std::string& str) {
-  const size_t append_size = 1 + str.size() + 2;
-  buffer->EnsureWritableBytes(append_size);
-  const std::string append_str = "+" + str + "\r\n";
-  buffer->Append(append_str.c_str(), append_size);
+  buffer->Append("+", 1);
+  buffer->Append(str.data(), str.size());
+  buffer->Append(kCRLF, 2);
 }
 
 void RESPEncoder::EncodeError(NetworkBuffer* buffer, const std::string& msg) {
-  const size_t append_size = 5 + msg.size() + 2;
-  buffer->EnsureWritableBytes(append_size);
-  const std::string append_str = "-ERR " + msg + "\r\n";
-  buffer->Append(append_str.c_str(), append_size);
+  buffer->Append("-ERR ", 5);
+  buffer->Append(msg.data(), msg.size());
+  buffer->Append(kCRLF, 2);
 }
 
 void RESPEncoder::EncodeInteger(NetworkBuffer* buffer, const int64_t val) {
-  const std::string msg = std::to_string(val);
-  const size_t append_size = 1 + msg.size() + 2;
-  buffer->EnsureWritableBytes(append_size);
-  const std::string append_str = ":" + msg + "\r\n";
-  buffer->Append(append_str.c_str(), append_size);
+  std::string s = std::to_string(val);
+  buffer->Append(":", 1);
+  buffer->Append(s.data(), s.size());
+  buffer->Append(kCRLF, 2);
 }
 
 void RESPEncoder::EncodeBulkString(NetworkBuffer* buffer,
                                    const std::string& str) {
-  const size_t prefix_size = 1 + str.size() + 2;
-  buffer->EnsureWritableBytes(prefix_size);
-  const std::string prefix_str = "$" + std::to_string(str.size()) + "\r\n";
-  buffer->Append(prefix_str.c_str(), prefix_size);
+  std::string len_str = std::to_string(str.size());
+  buffer->Append("$", 1);
+  buffer->Append(len_str.data(), len_str.size());
+  buffer->Append(kCRLF, 2);
 
-  buffer->EnsureWritableBytes(str.size());
   buffer->Append(str.data(), str.size());
-
-  constexpr size_t suffix_size = 2;
-  buffer->EnsureWritableBytes(suffix_size);
-  const std::string suffix_str = "\r\n";
-  buffer->Append(suffix_str.c_str(), suffix_size);
+  buffer->Append(kCRLF, 2);
 }
 
 void RESPEncoder::EncodeNull(NetworkBuffer* buffer) {
-  constexpr size_t append_size = 5;
-  buffer->EnsureWritableBytes(append_size);
-  buffer->Append("$-1\r\n", append_size);
+  buffer->Append("$-1", 3);
+  buffer->Append(kCRLF, 2);
 }
 
 void RESPEncoder::EncodeArray(NetworkBuffer* buffer,
                               const std::vector<std::string>& elements) {
-  const size_t prefix_size = 1 + elements.size() + 2;
-  buffer->EnsureWritableBytes(prefix_size);
-  const std::string prefix_str = "*" + std::to_string(elements.size()) + "\r\n";
-  buffer->Append(prefix_str.c_str(), prefix_size);
+  const std::string len_str = std::to_string(elements.size());
+  buffer->Append("*", 1);
+  buffer->Append(len_str.data(), len_str.size());
+  buffer->Append(kCRLF, 2);
 
   for (const auto& element : elements) {
-    EncodeSimpleString(buffer, element);
+    // Array 元素通常使用 BulkString 以保证二进制安全
+    EncodeBulkString(buffer, element);
   }
 }
