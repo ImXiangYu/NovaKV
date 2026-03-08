@@ -31,7 +31,7 @@ void RESPEncoder::EncodeBulkString(NetworkBuffer* buffer,
                                    const std::string& str) {
   const size_t prefix_size = 1 + str.size() + 2;
   buffer->EnsureWritableBytes(prefix_size);
-  const std::string prefix_str = "$" + std::to_string(prefix_size) + "\r\n";
+  const std::string prefix_str = "$" + std::to_string(str.size()) + "\r\n";
   buffer->Append(prefix_str.c_str(), prefix_size);
 
   buffer->EnsureWritableBytes(str.size());
@@ -53,7 +53,7 @@ void RESPEncoder::EncodeArray(NetworkBuffer* buffer,
                               const std::vector<std::string>& elements) {
   const size_t prefix_size = 1 + elements.size() + 2;
   buffer->EnsureWritableBytes(prefix_size);
-  const std::string prefix_str = "*" + std::to_string(prefix_size) + "\r\n";
+  const std::string prefix_str = "*" + std::to_string(elements.size()) + "\r\n";
   buffer->Append(prefix_str.c_str(), prefix_size);
 
   for (const auto& element : elements) {
