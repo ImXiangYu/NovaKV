@@ -18,7 +18,7 @@ void RESPEncoder::EncodeError(NetworkBuffer* buffer, const std::string& msg) {
 }
 
 void RESPEncoder::EncodeInteger(NetworkBuffer* buffer, const int64_t val) {
-  std::string s = std::to_string(val);
+  const std::string s = std::to_string(val);
   buffer->Append(":", 1);
   buffer->Append(s.data(), s.size());
   buffer->Append(kCRLF, 2);
@@ -26,7 +26,7 @@ void RESPEncoder::EncodeInteger(NetworkBuffer* buffer, const int64_t val) {
 
 void RESPEncoder::EncodeBulkString(NetworkBuffer* buffer,
                                    const std::string& str) {
-  std::string len_str = std::to_string(str.size());
+  const std::string len_str = std::to_string(str.size());
   buffer->Append("$", 1);
   buffer->Append(len_str.data(), len_str.size());
   buffer->Append(kCRLF, 2);
