@@ -69,7 +69,7 @@ class RESPEncoder {
   static void EncodeArray(NetworkBuffer* buffer,
                           const std::vector<std::string>& elements);
 
-private:
+ private:
   constexpr static auto kCRLF = "\r\n";
 };
 
