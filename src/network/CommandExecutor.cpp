@@ -36,12 +36,74 @@ void CommandExecutor::Execute(const std::vector<std::string>& command,
     HandleDel(command, response_buffer);
     return;
   }
-  if (cmd == "SCAN") {
-    HandleScan(command, response_buffer);
+  if (cmd == "RSCAN") {
+    HandleRScan(command, response_buffer);
     return;
   }
 
   RESPEncoder::EncodeError(response_buffer, "unknown command '" + cmd + "'");
+}
+
+void CommandExecutor::HandleSet(const std::vector<std::string>& command,
+                                NetworkBuffer* response_buffer) const {
+  if (!ExpectArgCount(command, 3, response_buffer)) {
+    return ;
+  }
+
+  const std::string& key = command[1];
+  const std::string& value = command[2];
+
+  ValueRecord record;
+  record.type = ValueType::kValue;
+  record.value = value;
+
+  db_->Put(key, record);
+
+  RESPEncoder::EncodeSimpleString(response_buffer, "OK");
+}
+
+void CommandExecutor::HandleGet(const std::vector<std::string>& command,
+                                NetworkBuffer* response_buffer) const {
+  if (!ExpectArgCount(command, 2, response_buffer)) {
+    return ;
+  }
+
+  const std::string& key = command[1];
+
+  ValueRecord record;
+  record.type = ValueType::kValue;
+  record.value = "";
+
+  const bool found = db_->Get(key, record);
+
+  if (!found) {
+    RESPEncoder::EncodeNull(response_buffer);
+    return;
+  }
+
+  RESPEncoder::EncodeBulkString(response_buffer, record.value);
+}
+
+void CommandExecutor::HandleDel(const std::vector<std::string>& command,
+                                NetworkBuffer* response_buffer) const {
+  if (!ExpectArgCount(command, 2, response_buffer)) {
+    return ;
+  }
+
+  const std::string& key = command[1];
+
+  ValueRecord record;
+  record.type = ValueType::kDeletion;
+  record.value = "";
+
+  db_->Put(key, record);
+
+  RESPEncoder::EncodeSimpleString(response_buffer, "OK");
+}
+
+void CommandExecutor::HandleRScan(const std::vector<std::string>& command,
+                                  NetworkBuffer* response_buffer) const {
+
 }
 
 std::string CommandExecutor::NormalizeCommandName(

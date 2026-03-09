@@ -63,7 +63,7 @@ class RESPEncoder {
       Array (数组)
       格式：*<元素数量>\r\n<元素1><元素2>...
       职责：封装一组 RESP 元素。
-      作用：用于 SCAN 命令返回 Key 列表，或者某些多值操作。
+      作用：用于 RSCAN 命令返回 Key 列表，或者某些多值操作。
       实现思路：写入 * 和数量，随后循环调用上述其他 Encode 方法。
    */
   static void EncodeArray(NetworkBuffer* buffer,

@@ -42,7 +42,7 @@ TEST_F(CommandExecutorTest, SetGetDelAndScanRoundTrip) {
   executor.Execute({"SET", "beta", "2"}, &response);
   EXPECT_EQ(DrainBuffer(response), "+OK\r\n");
 
-  executor.Execute({"SCAN", "alpha"}, &response);
+  executor.Execute({"RSCAN", "alpha"}, &response);
   EXPECT_EQ(DrainBuffer(response),
             "*4\r\n$5\r\nalpha\r\n$1\r\n1\r\n$4\r\nbeta\r\n$1\r\n2\r\n");
 
@@ -52,7 +52,7 @@ TEST_F(CommandExecutorTest, SetGetDelAndScanRoundTrip) {
   executor.Execute({"GET", "alpha"}, &response);
   EXPECT_EQ(DrainBuffer(response), "$-1\r\n");
 
-  executor.Execute({"SCAN", "alpha"}, &response);
+  executor.Execute({"RSCAN", "alpha"}, &response);
   EXPECT_EQ(DrainBuffer(response), "*2\r\n$4\r\nbeta\r\n$1\r\n2\r\n");
 }
 

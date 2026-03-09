@@ -21,8 +21,8 @@ class CommandExecutor {
                  NetworkBuffer* response_buffer) const;
   void HandleDel(const std::vector<std::string>& command,
                  NetworkBuffer* response_buffer) const;
-  void HandleScan(const std::vector<std::string>& command,
-                  NetworkBuffer* response_buffer) const;
+  void HandleRScan(const std::vector<std::string>& command,
+                   NetworkBuffer* response_buffer) const;
 
   static std::string NormalizeCommandName(const std::string& command_name);
   static bool ExpectArgCount(const std::vector<std::string>& command,
