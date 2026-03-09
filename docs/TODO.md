@@ -7,9 +7,9 @@
 - [x] 冻结当前基线并记录现状
   - [x] 记录当前可通过的测试集
   - [x] 记录当前基线 QPS（Put/Get）
-- [x] 明确统一对外语义
+  - [x] 明确统一对外语义
   - [x] `GET` 对 tombstone 返回未命中
-  - [x] 明确 `SET/GET/DEL/SCAN` 语义定义文档
+  - [x] 明确 `SET/GET/DEL/RSCAN` 语义定义文档
 
 ## Phase 1 - 存储语义闭环（最优先）
 - [x] 删除语义完整链路
@@ -56,7 +56,7 @@
   - [x] `CompactionEngine` 收口：减少长参数与跨模块回调，收敛为 compaction 执行接口
   - [x] 清理 `DBImpl` 中跨模块桥接胶水（长参数 + lambda），保持行为不变
 - [x] 重构约束（必须满足）
-  - [x] 不改变 `SET/GET/DEL/SCAN` 对外语义
+  - [x] 不改变 `SET/GET/DEL/RSCAN` 对外语义
   - [x] 不改变现有 WAL/SST/Manifest 文件格式
   - [x] 每拆一块就同步更新对应文档与 TODO 勾选
 
@@ -80,7 +80,7 @@
 
 - [ ] 2026-03-09（合并原 3/9 + 3/10 任务）
   - [ ] 明确网络主链路接口：`CommandExecutor` / `Connection` / 线程池任务模型 / 回写路径
-  - [ ] 建立 `CommandExecutor` 最小闭环：打通 `SET/GET/DEL/SCAN -> DBImpl -> RESPEncoder`
+  - [ ] 建立 `CommandExecutor` 最小闭环：打通 `SET/GET/DEL/RSCAN -> DBImpl -> RESPEncoder`
   - [ ] 统一参数校验与错误返回：未知命令、参数个数错误先定成标准 RESP 错误格式
   - [x] 已导入线程池并确认最小接口可复用：满足“提交任务 / worker 执行 / 停机退出”
 - [ ] 2026-03-10
@@ -125,7 +125,7 @@
   - [x] 解决“半包”问题：Parser 需支持断点续传，数据不足时保留状态
   - [x] 实现 RESP Encoder：支持 `+OK`、`-ERR`、`$Bulk` 等响应格式
 - [ ] 命令分发层（Command Dispatcher）
-  - [ ] 建立 `CommandExecutor`：将 `SET/GET/DEL/SCAN` 路由至 `DBImpl` 对应接口
+  - [ ] 建立 `CommandExecutor`：将 `SET/GET/DEL/RSCAN` 路由至 `DBImpl` 对应接口
   - [ ] 异常处理：对不支持的命令返回 Redis 标准错误格式
 - [ ] 高并发网络引擎（epoll）
   - [ ] 基础 Server 搭建：Non-blocking Socket + bind/listen

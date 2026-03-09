@@ -1,7 +1,8 @@
-# NovaKV 对外语义定义 V1（SET/GET/DEL/SCAN）
+# NovaKV 对外语义定义 V1（SET/GET/DEL/RSCAN）
 
 > 目标：统一“调用方看到的行为契约”，避免内部实现细节泄漏到上层。  
 > 范围：当前存储内核（`DBImpl` + `DBIterator`），网络协议层可直接映射本语义。
+> 注：`RSCAN` 是 NovaKV 自定义扩展命令，不是 Redis 原生 `SCAN`。
 
 ## 1. 当前接口与命令映射
 
@@ -18,7 +19,7 @@ std::unique_ptr<DBIterator> NewIterator();
 - `SET key value` -> `Put(key, ValueRecord{ValueType::kValue, value})`
 - `DEL key` -> `Put(key, ValueRecord{ValueType::kDeletion, ""})`
 - `GET key` -> `Get(key, record)` 后按语义判定是否命中
-- `SCAN start_key` -> `NewIterator()->Seek(start_key)` 后连续 `Next()`
+- `RSCAN start_key` -> `NewIterator()->Seek(start_key)` 后连续 `Next()`
 
 ## 2. 统一语义（V1 约定）
 
@@ -46,7 +47,7 @@ std::unique_ptr<DBIterator> NewIterator();
 - 幂等：重复删除同一 key，结果等价于一次删除。
 - 建议对外返回：`OK`（当前实现更适合该语义；不区分是否原本存在）。
 
-### 2.4 SCAN
+### 2.4 RSCAN
 
 - 输入：`start_key`。
 - 语义：
@@ -66,7 +67,7 @@ std::unique_ptr<DBIterator> NewIterator();
 - 重启后应满足：
   - `SET` 生效数据可恢复；
   - `DEL` 语义仍成立（`GET` 仍未命中）；
-  - `SCAN` 仍隐藏 tombstone，仅输出可见值。
+  - `RSCAN` 仍隐藏 tombstone，仅输出可见值。
 
 ## 5. 当前代码与 V1 语义的差异（你可按需改代码）
 
@@ -82,5 +83,5 @@ std::unique_ptr<DBIterator> NewIterator();
 
 - `GET` 对 tombstone 返回未命中（内存层、落盘层、跨层一致）。
 - 删除后重启，`GET` 仍未命中。
-- `SCAN` 不返回 tombstone key。
+- `RSCAN` 不返回 tombstone key。
 - 文档与接口一致（本文件 + 头文件签名 + 测试断言）。

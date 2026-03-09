@@ -22,4 +22,4 @@
 ## 4. Workflow Maintenance
 - **Feature Closure**: Remind the Owner to check `docs/TODO.md` after completing a feature.
 - **Phase Completion**: Remind the Owner to run QPS manually and assist in writing QPS notes.
-- **Consistency**: Sync interface definitions, tests, and docs whenever external semantics (`SET/GET/DEL/SCAN`) change.
+- **Consistency**: Sync interface definitions, tests, and docs whenever external semantics (`SET/GET/DEL/RSCAN`) change.
