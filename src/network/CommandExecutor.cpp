@@ -103,7 +103,25 @@ void CommandExecutor::HandleDel(const std::vector<std::string>& command,
 
 void CommandExecutor::HandleRScan(const std::vector<std::string>& command,
                                   NetworkBuffer* response_buffer) const {
+  if (!ExpectArgCount(command, 2, response_buffer)) {
+    return ;
+  }
 
+  const std::string& start_key = command[1];
+
+  const auto iter = db_->NewIterator();
+
+  iter->Seek(start_key);
+
+  std::vector<std::string> elements;
+
+  while (iter->Valid()) {
+    elements.emplace_back(iter->key());
+    elements.emplace_back(iter->value());
+    iter->Next();
+  }
+
+  RESPEncoder::EncodeArray(response_buffer, elements);
 }
 
 std::string CommandExecutor::NormalizeCommandName(
