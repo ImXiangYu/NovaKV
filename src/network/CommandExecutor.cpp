@@ -9,6 +9,7 @@
 #include <string>
 
 #include "network/RESPEncoder.h"
+#include "ValueRecord.h"
 
 void CommandExecutor::Execute(const std::vector<std::string>& command,
                               NetworkBuffer* response_buffer) const {
@@ -41,7 +42,7 @@ void CommandExecutor::Execute(const std::vector<std::string>& command,
     return;
   }
 
-  RESPEncoder::EncodeError(response_buffer, "unknown command '" + cmd + "'");
+  RESPEncoder::EncodeError(response_buffer, "unknown command '" + command[0] + "'");
 }
 
 void CommandExecutor::HandleSet(const std::vector<std::string>& command,
