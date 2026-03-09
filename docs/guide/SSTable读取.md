@@ -1,4 +1,4 @@
-# SstableReader
+# SSTable 读取
 
 ### 1. 核心痛点：为什么不直接读取文件？
 

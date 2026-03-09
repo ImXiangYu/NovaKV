@@ -1,4 +1,4 @@
-# WriteAheadLog——WSL——预写日志
+# WAL 预写日志
 
 ## WAL 核心原理解析
 

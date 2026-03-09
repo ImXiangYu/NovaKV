@@ -1,4 +1,4 @@
-# Linux 高性能网络编程：Epoll 与 Reactor 模式指南
+# Epoll 与 Reactor
 
 ## 1. 核心背景：从阻塞到多路复用
 

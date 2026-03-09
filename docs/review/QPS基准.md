@@ -1,4 +1,4 @@
-# NovaKV QPS 基准测试
+# QPS 基准
 
 
 无后台 compaction；仅 MemTable→SSTable 落盘；所有 SST 视作单层且不合并；读路径为 mem/imm + 全量 SST 扫描；日志关闭。
