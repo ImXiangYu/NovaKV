@@ -3,12 +3,17 @@
 //
 
 #include "network/CommandExecutor.h"
+
+#include <algorithm>
+#include <cctype>
+#include <string>
+
 #include "network/RESPEncoder.h"
 
 void CommandExecutor::Execute(const std::vector<std::string>& command,
                               NetworkBuffer* response_buffer) const {
   if (db_ == nullptr) {
-    RESPEncoder::EncodeError(response_buffer, "DB not initialized");
+    RESPEncoder::EncodeError(response_buffer, "db is not initialized");
     return;
   }
 
@@ -21,27 +26,27 @@ void CommandExecutor::Execute(const std::vector<std::string>& command,
 
   if (cmd == "SET") {
     HandleSet(command, response_buffer);
-    return ;
+    return;
   }
   if (cmd == "GET") {
     HandleGet(command, response_buffer);
-    return ;
+    return;
   }
   if (cmd == "DEL") {
     HandleDel(command, response_buffer);
-    return ;
+    return;
   }
   if (cmd == "SCAN") {
     HandleScan(command, response_buffer);
-    return ;
+    return;
   }
 
-  RESPEncoder::EncodeError(response_buffer, "unknown command ...");
+  RESPEncoder::EncodeError(response_buffer, "unknown command '" + cmd + "'");
 }
 
 std::string CommandExecutor::NormalizeCommandName(
     const std::string& command_name) {
-  std::string result = command_name; // 创建副本
+  std::string result = command_name;  // 创建副本
 
   // 使用 std::transform 进行原地转换
   std::transform(result.begin(), result.end(), result.begin(),
@@ -57,6 +62,7 @@ bool CommandExecutor::ExpectArgCount(const std::vector<std::string>& command,
   }
 
   const std::string cmd = NormalizeCommandName(command[0]);
-  RESPEncoder::EncodeError(response_buffer, "wrong number of arguments for " + cmd);
+  RESPEncoder::EncodeError(response_buffer,
+                           "wrong number of arguments for '" + cmd + "' command");
   return false;
 }
