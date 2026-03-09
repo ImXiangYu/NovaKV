@@ -64,13 +64,17 @@ include/     头文件（MemTable/SkipList/WAL/SSTable/DBImpl 等）
 src/         核心实现
 tests/       单元测试（每个 *.cpp 会生成独立测试目标）
 benchmark/   基准测试
-docs/        学习笔记、阶段总结、路线文档
+docs/        路线入口与分类文档目录
 ```
 
 ## 文档与路线
 - 路线与优先级：`docs/TODO.md`
 - 协作上下文：`docs/AGENT.md`
-- 学习笔记：`docs/` 目录下各专题文档
+- 按日期的研发日志：`docs/log/`
+- 协议和对外语义：`docs/spec/`
+- 架构/设计边界：`docs/design/`
+- 专题讲解和实现指南：`docs/guide/`
+- 阶段复盘、结果和总结：`docs/review/`
 
 ## 文档策略
 - 只在关键节点输出文档：设计分叉点、关键问题复盘、阶段完成总结。
