@@ -1,85 +1,127 @@
 # NovaKV
-基于 LSM-Tree 的 KV 存储系统学习实践。  
-项目定位：面向 C++ 后端求职的工程化项目（非生产级），强调“可实现、可验证、可讲解”。
 
-## 项目目标
-- 通过从零实现核心存储链路，理解 LSM-Tree 关键机制。
-- 形成可面试讲解的双主线能力：
-  - 存储主线：WAL / MemTable / SSTable / Compaction / Recovery
-  - 网络主线：Client-Server 协议 / 并发模型 / 服务稳定性（规划中）
+一个基于 LSM-Tree 的 KV 存储系统学习项目。  
+这份 README 只负责提供项目全局视角：项目是什么、包含什么、如何使用、从哪里进入。
 
-## 当前状态（现状）
-### 已实现
-- MemTable（跳表）+ WAL 写前日志。
-- WAL CRC32 校验与启动回放。
-- SSTable Builder/Reader（Data Block / Index / Footer / Bloom Filter）。
-- DBImpl 统一读写路径，支持 L0/L1。
-- Minor Compaction（MemTable -> SST）与基础 L0->L1 合并。
-- 启动恢复：加载 `.sst`、回放 `.wal`。
-- `MANIFEST` 持久化并恢复 `next_file_number_`。
-- 迭代器扫描：合并 MemTable + L0 + L1，遵循“新版本优先”，并隐藏 tombstone。
+## 项目是什么
 
-### 进行中
-- 删除语义完整链路（跨层 tombstone 保留/清理策略）。
-- 完整版本元数据（Manifest 记录存活文件与层级关系）。
-- 后台任务（imm flush / major compaction）与并发策略收敛。
+NovaKV 是一个面向 C++ 后端学习与项目表达的 KV 数据库实现，核心目标有两条：
 
-### 规划中
-- 网络服务化（`epoll + 线程池`）与 client-server 协议。
+- 存储主线：理解并实现 WAL、MemTable、SSTable、Compaction、Recovery
+- 网络主线：基于 RESP 协议将存储能力服务化，补齐连接管理、并发模型与回包链路
 
-详细顺序请见：`docs/TODO.md`（顺序执行版）。
+它的定位是“可实现、可验证、可讲解”的工程化项目，而不是生产级数据库。
 
-## 构建与运行
-本项目使用 CMake + C++17。测试与基准依赖 GoogleTest/Google Benchmark（通过 FetchContent 拉取，需要网络）。
+## 项目包含什么
+
+### 存储层
+
+- MemTable（跳表）
+- WAL 写前日志
+- SSTable Builder / Reader
+- LSM-Tree 读写路径
+- Minor Compaction 与基础层间合并
+- Manifest 元数据管理
+- 启动恢复与多 WAL 回放
+- 迭代器与范围扫描
+
+### 网络层
+
+- RESP Parser
+- RESP Encoder
+- 命令分发层 `CommandExecutor`
+- 面向后续 `epoll + 线程池` 的网络主链路设计
+
+### 测试与基准
+
+- `tests/`：单元测试
+- `benchmark/`：基准测试
+
+## 当前对外能力
+
+当前对外命令语义包括：
+
+- `SET key value`
+- `GET key`
+- `DEL key`
+- `RSCAN start_key`
+
+说明：
+
+- `GET` 命中 tombstone 时按未命中处理
+- `RSCAN` 返回所有 `key >= start_key` 的可见 KV
+- `RSCAN` 是 NovaKV 自定义范围扫描命令，不是 Redis 原生 `SCAN`
+- 项目使用 RESP 协议，因此可以用 `redis-cli` 作为客户端联调工具
+
+语义定义见：[对外语义V1](/home/ayu/GithubProjects/NovaKV/docs/spec/%E5%AF%B9%E5%A4%96%E8%AF%AD%E4%B9%89V1.md)
+
+## 如何使用这个项目
 
 ### 构建
+
 ```bash
 cmake -S . -B build
 cmake --build build
 ```
 
 ### 运行全部测试
+
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-### 运行单个测试（示例）
+### 运行单个测试
+
 ```bash
 ./build/dbimpl_test
 ./build/iterator_test
+./build/command_executor_test
 ```
 
-### 运行基准测试
+### 运行基准
+
 ```bash
 ./build/nova_bench
 ```
 
-说明：
-- `nova_test` 目前是 `main.cpp` 的手动示例程序（非完整 DB 客户端）。
-- `SSTableReader` 使用 `mmap` 等 POSIX 接口，建议在 Linux/WSL 环境下开发和运行。
+### 手动入口
 
-## 目录结构
-```text
-include/     头文件（MemTable/SkipList/WAL/SSTable/DBImpl 等）
-src/         核心实现
-tests/       单元测试（每个 *.cpp 会生成独立测试目标）
-benchmark/   基准测试
-docs/        路线入口与分类文档目录
+```bash
+./build/nova_test
 ```
 
-## 文档与路线
-- 路线与优先级：`docs/TODO.md`
-- 协作上下文：`docs/AGENT.md`
-- 按日期的研发日志：`docs/log/`
-- 协议和对外语义：`docs/spec/`
-- 架构/设计边界：`docs/design/`
-- 专题讲解和实现指南：`docs/guide/`
-- 阶段复盘、结果和总结：`docs/review/`
+说明：
 
-## 文档策略
-- 只在关键节点输出文档：设计分叉点、关键问题复盘、阶段完成总结。
-- 文档目标是复盘与面试表达，不追求记录每个实现细节。
+- 项目使用 CMake + C++17
+- 测试和基准依赖 GoogleTest / Google Benchmark
+- `SSTableReader` 使用 `mmap`，建议在 Linux / WSL 环境运行
 
-## 边界说明
-- 这是个人学习项目，优先保证结构清晰与可验证正确性。
-- 当前不追求生产级能力（完整多层 compaction、分布式能力、工业级容错等）。
+## 从哪里进入项目
+
+### 代码入口
+
+- 存储核心：`include/DBImpl.h`、`src/DBImpl.cpp`
+- 网络协议：`include/network/`、`src/network/`
+- 命令分发：`include/network/CommandExecutor.h`、`src/network/CommandExecutor.cpp`
+- 测试：`tests/`
+- 基准：`benchmark/db_bench.cpp`
+
+### 文档入口
+
+- 总任务清单：[docs/TODO.md](/home/ayu/GithubProjects/NovaKV/docs/TODO.md)
+- 协作约束：[docs/AGENT.md](/home/ayu/GithubProjects/NovaKV/docs/AGENT.md)
+- 规格文档：[docs/spec/](/home/ayu/GithubProjects/NovaKV/docs/spec)
+- 设计文档：[docs/design/](/home/ayu/GithubProjects/NovaKV/docs/design)
+- 实现指南：[docs/guide/](/home/ayu/GithubProjects/NovaKV/docs/guide)
+- 复盘总结：[docs/review/](/home/ayu/GithubProjects/NovaKV/docs/review)
+- 研发日志：[docs/log/](/home/ayu/GithubProjects/NovaKV/docs/log)
+
+## 目录结构
+
+```text
+include/     头文件
+src/         核心实现
+tests/       单元测试
+benchmark/   基准测试
+docs/        规格、设计、指南、复盘、日志
+```
