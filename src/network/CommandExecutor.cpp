@@ -1,0 +1,62 @@
+//
+// Created by 26708 on 2026/3/9.
+//
+
+#include "network/CommandExecutor.h"
+#include "network/RESPEncoder.h"
+
+void CommandExecutor::Execute(const std::vector<std::string>& command,
+                              NetworkBuffer* response_buffer) const {
+  if (db_ == nullptr) {
+    RESPEncoder::EncodeError(response_buffer, "DB not initialized");
+    return;
+  }
+
+  if (command.empty()) {
+    RESPEncoder::EncodeError(response_buffer, "empty command");
+    return;
+  }
+
+  const std::string cmd = NormalizeCommandName(command[0]);
+
+  if (cmd == "SET") {
+    HandleSet(command, response_buffer);
+    return ;
+  }
+  if (cmd == "GET") {
+    HandleGet(command, response_buffer);
+    return ;
+  }
+  if (cmd == "DEL") {
+    HandleDel(command, response_buffer);
+    return ;
+  }
+  if (cmd == "SCAN") {
+    HandleScan(command, response_buffer);
+    return ;
+  }
+
+  RESPEncoder::EncodeError(response_buffer, "unknown command ...");
+}
+
+std::string CommandExecutor::NormalizeCommandName(
+    const std::string& command_name) {
+  std::string result = command_name; // 创建副本
+
+  // 使用 std::transform 进行原地转换
+  std::transform(result.begin(), result.end(), result.begin(),
+                 [](unsigned char c) { return std::toupper(c); });
+
+  return result;
+}
+bool CommandExecutor::ExpectArgCount(const std::vector<std::string>& command,
+                                     size_t expected_argc,
+                                     NetworkBuffer* response_buffer) {
+  if (command.size() == expected_argc) {
+    return true;
+  }
+
+  const std::string cmd = NormalizeCommandName(command[0]);
+  RESPEncoder::EncodeError(response_buffer, "wrong number of arguments for " + cmd);
+  return false;
+}
