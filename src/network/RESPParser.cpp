@@ -115,7 +115,6 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
 
         // 2. 提取数据，存入 out_command
         // 读出 bulk_len_ 个字节
-        const char* firstPos = buffer->Peek();
         out_command.emplace_back(firstPos, static_cast<size_t>(bulk_len_));
         buffer->Retrieve(bulk_len_ + 2);
         // 3. 检查是否解析完所有参数，完事了就返回 SUCCESS

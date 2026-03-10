@@ -84,3 +84,53 @@ TEST_F(RESPParserTest, EmptyArray) {
   EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::SUCCESS);
   EXPECT_TRUE(cmd.empty());
 }
+
+TEST_F(RESPParserTest, RejectsNegativeArrayLength) {
+  const char* raw = "*-1\r\n";
+  buffer.Append(raw, strlen(raw));
+
+  std::vector<std::string> cmd;
+  EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::ERROR);
+}
+
+TEST_F(RESPParserTest, RejectsTrailingGarbageInArrayLength) {
+  const char* raw = "*2x\r\n";
+  buffer.Append(raw, strlen(raw));
+
+  std::vector<std::string> cmd;
+  EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::ERROR);
+}
+
+TEST_F(RESPParserTest, AcceptsNullBulkString) {
+  const char* raw = "*1\r\n$-1\r\n";
+  buffer.Append(raw, strlen(raw));
+
+  std::vector<std::string> cmd;
+  EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::SUCCESS);
+  ASSERT_EQ(cmd.size(), 1);
+  EXPECT_EQ(cmd[0], "");
+}
+
+TEST_F(RESPParserTest, RejectsInvalidNegativeBulkLength) {
+  const char* raw = "*1\r\n$-2\r\n";
+  buffer.Append(raw, strlen(raw));
+
+  std::vector<std::string> cmd;
+  EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::ERROR);
+}
+
+TEST_F(RESPParserTest, RejectsTrailingGarbageInBulkLength) {
+  const char* raw = "*1\r\n$3x\r\nabc\r\n";
+  buffer.Append(raw, strlen(raw));
+
+  std::vector<std::string> cmd;
+  EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::ERROR);
+}
+
+TEST_F(RESPParserTest, RejectsBulkDataWithoutCRLFTerminator) {
+  const char* raw = "*1\r\n$3\r\nabcxx";
+  buffer.Append(raw, strlen(raw));
+
+  std::vector<std::string> cmd;
+  EXPECT_EQ(parser.Parse(&buffer, cmd), ParseStatus::ERROR);
+}
