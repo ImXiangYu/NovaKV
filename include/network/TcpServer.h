@@ -5,6 +5,7 @@
 #ifndef NOVAKV_TCPSERVER_H
 #define NOVAKV_TCPSERVER_H
 
+#include <cstdint>
 #include <unordered_map>
 
 #include "network/CommandExecutor.h"
