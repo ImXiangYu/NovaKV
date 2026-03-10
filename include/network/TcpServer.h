@@ -24,9 +24,9 @@ class TcpServer {
   bool InitListenSocket(uint16_t port);
   bool InitEpoll();
 
-  bool AddEpollEvent(int fd, uint32_t events);
-  bool UpdateEpollEvent(int fd, uint32_t events);
-  void RemoveEpollEvent(int fd);
+  bool AddEpollEvent(int fd, uint32_t events) const;
+  bool UpdateEpollEvent(int fd, uint32_t events) const;
+  void RemoveEpollEvent(int fd) const;
 
   void HandleAccept();
   void HandleConnectionEvent(int fd, uint32_t events);
