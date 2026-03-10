@@ -6,7 +6,7 @@
 
 这意味着，除了普通文件，socket 也可以被内核当成“一个可控制的 fd 对象”来看待。`fcntl` 就是 Linux 提供的通用控制接口，用来读取或修改一个 fd 的属性。
 
-在 NovaKV 当前这一步里，我们使用 `fcntl` 的目的很明确：
+在网络层里，使用 `fcntl` 的目的很明确：
 
 - 给监听 socket 加上 `O_NONBLOCK`
 - 让它适合放进后续的 `epoll` 事件循环里
@@ -50,7 +50,7 @@ int fcntl(int fd, int cmd, ...);
 
 ## 4. 我们当前为什么用它
 
-当前阶段的目标是把 socket 改成 non-blocking。
+这里的目标是把 socket 改成 non-blocking。
 
 原因是：
 
@@ -191,16 +191,16 @@ NovaKV 后面的网络层是：
 
 - `FD_CLOEXEC`
 
-它和 `O_NONBLOCK` 不是一回事，也不是当前这一步的重点。
+它和 `O_NONBLOCK` 不是一回事，也不是这里的重点。
 
-所以你现在只要先记住：
+这里先记住：
 
 - 设 non-blocking：用 `F_GETFL / F_SETFL`
 - 控制 `FD_CLOEXEC` 这类 descriptor 标志：用 `F_GETFD / F_SETFD`
 
 ## 10. 对应到 NovaKV 的函数
 
-在当前 `TcpServer` 里，这一步对应的就是：
+在 `TcpServer` 里，这一步对应的就是：
 
 ```cpp
 bool TcpServer::SetNonBlocking(int fd) {
