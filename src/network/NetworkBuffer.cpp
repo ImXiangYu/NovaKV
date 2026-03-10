@@ -59,7 +59,9 @@ ssize_t NetworkBuffer::ReadFromFd(const int fd, int* savedErrno) {
   const ssize_t n = ::readv(fd, iov, 2);
 
   if (n < 0) {
-    *savedErrno = errno;
+    if (savedErrno != nullptr) {
+      *savedErrno = errno;
+    }
     return -1;
   }
   if (static_cast<size_t>(n) <= writable) {

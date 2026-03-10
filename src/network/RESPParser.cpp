@@ -34,15 +34,18 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         // 3. 提取数字，设置 array_size_
         // 提取*后的，crlf之前的
         auto [ptr, ec] = std::from_chars(firstPos + 1, crlf, array_size_);
-        if (ec == std::errc()) {
-          if (array_size_ <= 0) {
-            // 特殊处理：空数组直接返回成功，并领走数据
-            buffer->Retrieve(crlf - firstPos + 2);
-            Reset();
-            return ParseStatus::SUCCESS;
-          }
-        } else {
+        if (ec != std::errc() || ptr != crlf) {
           return ParseStatus::ERROR;
+        }
+
+        if (array_size_ < 0) {
+          return ParseStatus::ERROR;
+        }
+
+        if (array_size_ == 0) {
+          buffer->Retrieve(crlf - firstPos + 2);
+          Reset();
+          return ParseStatus::SUCCESS;
         }
         // 4. 状态跳至 EXPECT_BULK_SIZE
         // 先Retrieve
@@ -70,24 +73,25 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
         }
         // 3. 提取长度 bulk_len_
         auto [ptr, ec] = std::from_chars(firstPos + 1, crlf, bulk_len_);
-        if (ec == std::errc()) {
-          if (bulk_len_ == -1) {
-            // 特殊处理：Redis Null Bulk String
-            buffer->Retrieve(crlf - firstPos + 2);  // 领走 $-1\r\n
-            out_command.emplace_back("");           // 插入空字符串代表 Null
-
-            // 检查是否已经解析完所有参数
-            if (out_command.size() == static_cast<size_t>(array_size_)) {
-              Reset();
-              return ParseStatus::SUCCESS;
-            } else {
-              state_ = State::EXPECT_BULK_SIZE;
-              continue;  // 必须 continue 重新循环，不能让它走到
-                         // EXPECT_BULK_DATA
-            }
-          }
-        } else {
+        if (ec != std::errc() || ptr != crlf) {
           return ParseStatus::ERROR;
+        }
+
+        if (bulk_len_ < -1) {
+          return ParseStatus::ERROR;
+        }
+
+        if (bulk_len_ == -1) {
+          buffer->Retrieve(crlf - firstPos + 2);
+          out_command.emplace_back("");
+
+          if (out_command.size() == static_cast<size_t>(array_size_)) {
+            Reset();
+            return ParseStatus::SUCCESS;
+          }
+
+          state_ = State::EXPECT_BULK_SIZE;
+          continue;
         }
         // 4. 状态跳至 EXPECT_BULK_DATA
         // 先Retrieve
@@ -97,10 +101,18 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
       }
       case State::EXPECT_BULK_DATA: {
         // 1. 检查 buffer 可读字节是否够 bulk_len_ + 2 (\r\n)
+        const auto data_len = static_cast<size_t>(bulk_len_);
         if (buffer->ReadableBytes() < static_cast<size_t>(bulk_len_ + 2)) {
           // 数据不完整
           return ParseStatus::INCOMPLETE;
         }
+
+        // 检查是否是\r\n
+        const char* firstPos = buffer->Peek();
+        if (firstPos[data_len] != '\r' || firstPos[data_len + 1] != '\n') {
+          return ParseStatus::ERROR;
+        }
+
         // 2. 提取数据，存入 out_command
         // 读出 bulk_len_ 个字节
         const char* firstPos = buffer->Peek();
