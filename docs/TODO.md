@@ -83,10 +83,10 @@
   - [x] 建立 `CommandExecutor` 最小闭环：打通 `SET/GET/DEL/RSCAN -> DBImpl -> RESPEncoder`
   - [x] 统一参数校验与错误返回：未知命令、参数个数错误先定成标准 RESP 错误格式
   - [x] 已导入线程池并确认最小接口可复用：满足“提交任务 / worker 执行 / 停机退出”
-- [ ] 2026-03-10
-  - [ ] 基础 Server 搭建：完成 non-blocking socket、`bind/listen`、`accept`
-  - [ ] 搭建 `epoll` 骨架：事件注册、事件分发主循环、连接创建与销毁入口
-  - [ ] 为每个连接挂接独立上下文：输入缓冲、输出缓冲、RESP parser、连接状态
+- [x] 2026-03-10
+  - [x] 基础 Server 搭建：完成 non-blocking socket、`bind/listen`、`accept`
+  - [x] 搭建 `epoll` 骨架：事件注册、事件分发主循环、连接创建与销毁入口
+  - [x] 为每个连接挂接独立上下文：输入缓冲、输出缓冲、RESP parser、连接状态
 - [ ] 2026-03-11
   - [ ] 打通单线程请求链路：读 socket -> 写入 `NetworkBuffer` -> RESP parse -> `CommandExecutor`
   - [ ] 打通响应回包：`RESPEncoder` 输出写入连接缓冲，并在可写事件中发送
