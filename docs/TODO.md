@@ -78,10 +78,10 @@
 
 ### 2026-03-09 ~ 2026-03-31 执行时间线（复试 / 求职双用途）
 
-- [ ] 2026-03-09（合并原 3/9 + 3/10 任务）
-  - [ ] 明确网络主链路接口：`CommandExecutor` / `Connection` / 线程池任务模型 / 回写路径
-  - [ ] 建立 `CommandExecutor` 最小闭环：打通 `SET/GET/DEL/RSCAN -> DBImpl -> RESPEncoder`
-  - [ ] 统一参数校验与错误返回：未知命令、参数个数错误先定成标准 RESP 错误格式
+- [x] 2026-03-09（合并原 3/9 + 3/10 任务）
+  - [x] 明确网络主链路接口：`CommandExecutor` / `Connection` / 线程池任务模型 / 回写路径
+  - [x] 建立 `CommandExecutor` 最小闭环：打通 `SET/GET/DEL/RSCAN -> DBImpl -> RESPEncoder`
+  - [x] 统一参数校验与错误返回：未知命令、参数个数错误先定成标准 RESP 错误格式
   - [x] 已导入线程池并确认最小接口可复用：满足“提交任务 / worker 执行 / 停机退出”
 - [ ] 2026-03-10
   - [ ] 基础 Server 搭建：完成 non-blocking socket、`bind/listen`、`accept`
