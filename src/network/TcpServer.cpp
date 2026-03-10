@@ -4,6 +4,9 @@
 
 #include "network/TcpServer.h"
 
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 TcpServer::TcpServer(DBImpl* db) : executor_(db) {}
 TcpServer::~TcpServer() { Stop(); }
@@ -41,4 +44,52 @@ void TcpServer::Stop() {
     close(listen_fd_);
     listen_fd_ = -1;
   }
+}
+bool TcpServer::InitListenSocket(uint16_t port) {
+  listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+  if (listen_fd_ < 0) {
+    return false;
+  }
+
+  constexpr int opt = 1;
+  if (setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+    return false;
+  }
+
+  if (!SetNonBlocking(listen_fd_)) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+    return false;
+  }
+
+  sockaddr_in addr = {};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  addr.sin_port = htons(port);
+
+  if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+    return false;
+  }
+
+  if (listen(listen_fd_, SOMAXCONN) < 0) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+    return false;
+  }
+
+  return true;
+}
+bool TcpServer::SetNonBlocking(const int fd) {
+  const int flags = fcntl(fd, F_GETFL, 0);
+  if (flags < 0) {
+    return false;
+  }
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+    return false;
+  }
+  return true;
 }
