@@ -8,6 +8,7 @@
 #include <sys/uio.h>
 
 #include <algorithm>
+#include <cerrno>
 NetworkBuffer::NetworkBuffer(const size_t initial_size)
     : buffer_(initial_size), read_index_(0), write_index_(0) {}
 void NetworkBuffer::EnsureWritableBytes(const size_t len) {
@@ -42,28 +43,33 @@ const char* NetworkBuffer::FindCRLF() const {
   return (pos == Peek() + ReadableBytes()) ? nullptr : pos;
 }
 
-size_t NetworkBuffer::ReadFromFd(const int fd) {
-  char extra_buffer[65536];  // 栈上准备 64KB 备选空间
+ssize_t NetworkBuffer::ReadFromFd(const int fd, int* savedErrno) {
+  char extra_buffer[65536];
+  struct iovec iov[2];
 
-  // 使用 iovec 将数据一次性读入 Buffer 的剩余空间
-  // 如果 Buffer 不够，剩下的进 extra_buffer
+  // 1. 缓存当前剩余可写空间
+  const size_t writable = WritableBytes();
 
-  iovec iov[2];
   iov[0].iov_base = buffer_.data() + write_index_;
-  iov[0].iov_len = WritableBytes();
+  iov[0].iov_len = writable;
   iov[1].iov_base = extra_buffer;
   iov[1].iov_len = sizeof(extra_buffer);
 
-  const size_t n = readv(fd, iov, 2);
+  // 2. 使用 ssize_t 接收，处理错误
+  const ssize_t n = ::readv(fd, iov, 2);
 
   if (n < 0) {
-    return 0;
+    *savedErrno = errno;
+    return -1;
   }
-  if (static_cast<size_t>(n) <= WritableBytes()) {
-    write_index_ += n;  // 全部读进 buffer_
+  if (static_cast<size_t>(n) <= writable) {
+    // 数据全部落入了初始缓冲区
+    write_index_ += n;
   } else {
-    write_index_ = buffer_.size();              // buffer_ 填满了
-    Append(extra_buffer, n - WritableBytes());  // 剩下的数据触发扩容并拷入
+    // 初始缓冲区满了，数据溢出到了 extra_buffer
+    write_index_ = buffer_.size();
+    // 关键点：使用之前缓存的 writable 变量
+    Append(extra_buffer, n - writable);
   }
   return n;
 }

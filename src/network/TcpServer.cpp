@@ -9,6 +9,8 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <cerrno>
 TcpServer::TcpServer(DBImpl* db) : executor_(db) {}
 TcpServer::~TcpServer() { Stop(); }
 bool TcpServer::Start(const uint16_t port) {
@@ -28,6 +30,31 @@ bool TcpServer::Start(const uint16_t port) {
 
   running_ = true;
   return true;
+}
+void TcpServer::Run() {
+  constexpr int kMaxEvents = 64;
+  epoll_event events[kMaxEvents];
+
+  while (running_) {
+    const int ready = epoll_wait(epoll_fd_, events, kMaxEvents, -1);
+    if (ready < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+
+    for (int i = 0; i < ready; ++i) {
+      const int fd = events[i].data.fd;
+      const uint32_t ev = events[i].events;
+
+      if (fd == listen_fd_) {
+        HandleAccept();
+      } else {
+        HandleConnectionEvent(fd, ev);
+      }
+    }
+  }
 }
 void TcpServer::Stop() {
   running_ = false;
@@ -111,7 +138,7 @@ bool TcpServer::UpdateEpollEvent(const int fd, const uint32_t events) const {
   ev.events = events;
   ev.data.fd = fd;
 
-  // epoll_ctl(... EPOLL_CTL_ADD ...) 是把某个 fd 注册进epoll，
+  // epoll_ctl(... EPOLL_CTL_MOD ...) 是把某个 fd 注册进epoll，
   // 并告诉内核关心什么事件
   if (epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd, &ev) < 0) {
     return false;
@@ -120,6 +147,66 @@ bool TcpServer::UpdateEpollEvent(const int fd, const uint32_t events) const {
 }
 void TcpServer::RemoveEpollEvent(const int fd) const {
   epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
+}
+void TcpServer::HandleAccept() {
+  while (true) {
+    sockaddr_in client_addr{};
+    socklen_t client_len = sizeof(client_addr);
+
+    int client_fd = accept(
+        listen_fd_, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
+
+    if (client_fd < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;
+      }
+      break;
+    }
+
+    if (!SetNonBlocking(client_fd)) {
+      close(client_fd);
+      continue;
+    }
+
+    auto [it, inserted] = connections_.try_emplace(client_fd, client_fd);
+    if (!inserted) {
+      close(client_fd);
+      continue;
+    }
+
+    if (!AddEpollEvent(client_fd, EPOLLIN | EPOLLRDHUP)) {
+      connections_.erase(it);
+      close(client_fd);
+      continue;
+    }
+  }
+}
+void TcpServer::HandleConnectionEvent(int fd, uint32_t events) {
+  if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+    CloseConnection(fd);
+    return;
+  }
+
+  if (events & EPOLLIN) {
+
+  }
+
+  if (events & EPOLLOUT) {
+
+  }
+}
+void TcpServer::CloseConnection(const int fd) {
+  const auto it = connections_.find(fd);
+  if (it == connections_.end()) {
+    return ;
+  }
+
+  RemoveEpollEvent(fd);
+  close(fd);
+  connections_.erase(it);
 }
 bool TcpServer::SetNonBlocking(const int fd) {
   const int flags = fcntl(fd, F_GETFL, 0);

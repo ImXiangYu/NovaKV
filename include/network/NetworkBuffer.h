@@ -4,6 +4,8 @@
 
 #ifndef NOVAKV_NETWORKBUFFER_H
 #define NOVAKV_NETWORKBUFFER_H
+#include <sys/types.h>
+
 #include <vector>
 
 class NetworkBuffer {
@@ -38,7 +40,7 @@ class NetworkBuffer {
   [[nodiscard]] const char* FindCRLF() const;
 
   // 一次性尽量读完 socket 里的所有数据，减少 epoll_wait 的系统调用次数
-  size_t ReadFromFd(int fd);
+  ssize_t ReadFromFd(int fd, int* savedErrno);
 
  private:
   std::vector<char> buffer_;  // 底层存储容器
