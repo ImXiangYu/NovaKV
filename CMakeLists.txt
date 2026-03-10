@@ -20,6 +20,8 @@ set(NOVAKV_SOURCES
         src/network/RESPParser.cpp
         src/network/RESPEncoder.cpp
         src/network/CommandExecutor.cpp
+        src/network/Connection.cpp
+        src/network/TcpServer.cpp
 )
 
 add_library(novakv_core ${NOVAKV_SOURCES})
