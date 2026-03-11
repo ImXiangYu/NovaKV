@@ -185,28 +185,122 @@ void TcpServer::HandleAccept() {
   }
 }
 void TcpServer::HandleConnectionEvent(int fd, uint32_t events) {
-  if (events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+  if (events & (EPOLLERR | EPOLLHUP)) {
     CloseConnection(fd);
     return;
   }
 
   if (events & EPOLLIN) {
-
+    HandleRead(fd);
   }
 
   if (events & EPOLLOUT) {
-
+    HandleWrite(fd);
   }
 }
 void TcpServer::CloseConnection(const int fd) {
   const auto it = connections_.find(fd);
   if (it == connections_.end()) {
-    return ;
+    return;
   }
 
   RemoveEpollEvent(fd);
   close(fd);
   connections_.erase(it);
+}
+void TcpServer::HandleRead(const int fd) {
+  // 找到 Connection
+  const auto it = connections_.find(fd);
+  if (it == connections_.end()) {
+    return;
+  }
+  Connection& conn = it->second;
+
+  // 做一次 Socket 读取
+  int savedErrno = 0;
+  const ssize_t n = conn.input_buffer.ReadFromFd(fd, &savedErrno);
+
+  // 对端正常关闭了连接
+  // 这是 TCP 的 EOF 语义
+  if (n == 0) {
+    CloseConnection(fd);
+    return;
+  }
+  // 这时要看 savedErrno
+  if (n < 0) {
+    // 非阻塞 socket 当前已经没有更多数据可读，这不是错误，只是“这轮读完了”
+    if (savedErrno == EAGAIN || savedErrno == EWOULDBLOCK) return;
+    // 系统调用被信号打断，中断
+    if (savedErrno == EINTR) return;
+    // 其他错误，是真实读错误
+    CloseConnection(fd);
+    return;
+  }
+
+  while (true) {
+    std::vector<std::string> command;
+    const ParseStatus status = conn.parser.Parse(&conn.input_buffer, command);
+
+    if (status == ParseStatus::SUCCESS) {
+      executor_.Execute(command, &conn.output_buffer);
+      continue;
+    }
+    if (status == ParseStatus::INCOMPLETE) {
+      break;
+    }
+
+    CloseConnection(fd);  // 非法 RESP 暂时直接关
+    return;
+  }
+
+  if (conn.output_buffer.ReadableBytes() > 0) {
+    if (!UpdateEpollEvent(fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT)) {
+      CloseConnection(fd);
+      return;
+    }
+  }
+}
+void TcpServer::HandleWrite(const int fd) {
+  const auto it = connections_.find(fd);
+  if (it == connections_.end()) {
+    return;
+  }
+
+  Connection& conn = it->second;
+
+  while (conn.output_buffer.ReadableBytes() > 0) {
+    const ssize_t n = write(fd, conn.output_buffer.Peek(),
+                            conn.output_buffer.ReadableBytes());
+
+    if (n > 0) {
+      conn.output_buffer.Retrieve(static_cast<size_t>(n));
+      continue;
+    }
+
+    if (n == 0) {
+      break;
+    }
+
+    // 系统调用被信号打断
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      break;
+    }
+    CloseConnection(fd);
+    return;
+  }
+  if (conn.output_buffer.ReadableBytes() == 0) {
+    if (!UpdateEpollEvent(fd, EPOLLIN | EPOLLRDHUP)) {
+      CloseConnection(fd);
+      return;
+    }
+
+    if (conn.closing) {
+      CloseConnection(fd);
+    }
+  }
 }
 bool TcpServer::SetNonBlocking(const int fd) {
   const int flags = fcntl(fd, F_GETFL, 0);

@@ -32,6 +32,9 @@ class TcpServer {
   void HandleConnectionEvent(int fd, uint32_t events);
   void CloseConnection(int fd);
 
+  void HandleRead(int fd);
+  void HandleWrite(int fd);
+
   static bool SetNonBlocking(int fd);
 
   CommandExecutor executor_;
