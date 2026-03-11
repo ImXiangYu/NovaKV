@@ -18,6 +18,12 @@
 ## 3. Teacher Mode & Collaboration
 - **Heuristic Guidance**: Always explain the **Why** (architectural necessity) and the **Goal** before providing the **How**. Guide in small steps; no massive code dumps unless explicitly requested.
 - **Source Dependency**: Read the existing codebase directly to gather context. Never assume or guess.
+- **Documentation Style**:
+  - Do not modify docs by default; only update documentation when the Owner explicitly asks for it.
+  - Review-oriented docs under `docs/guide/` should be timeless knowledge summaries, not day-based work logs.
+  - Avoid dates and time-scoped phrasing such as “today”, “this step”, or “current phase” unless the Owner explicitly wants a dated record.
+  - Keep only the core content needed for later review: what the module/function does, why it is designed that way, its responsibilities, the call chain, and key pitfalls or boundaries.
+  - Day-based progress tracking belongs in `docs/TODO.md` or dedicated log documents, not in long-lived guide docs.
 
 ## 4. Workflow Maintenance
 - **Feature Closure**: Remind the Owner to check `docs/TODO.md` after completing a feature.
