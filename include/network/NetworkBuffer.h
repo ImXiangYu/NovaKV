@@ -7,6 +7,7 @@
 #include <sys/types.h>
 
 #include <vector>
+#include <string>
 
 class NetworkBuffer {
  public:
@@ -41,6 +42,13 @@ class NetworkBuffer {
 
   // 一次性尽量读完 socket 里的所有数据，减少 epoll_wait 的系统调用次数
   ssize_t ReadFromFd(int fd, int* savedErrno);
+
+  // 将缓冲区内所有可读数据提取出来，并以 string 形式返回
+  std::string RetrieveAllAsString() {
+    std::string result(Peek(), ReadableBytes());
+    RetrieveAll(); // 提取完后清空索引
+    return result;
+  }
 
  private:
   std::vector<char> buffer_;  // 底层存储容器

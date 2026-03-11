@@ -61,11 +61,11 @@ class TcpServer {
   // IO 线程处理完成队列的入口
   void HandleWorkerCompletions();
 
-  Ayu::ThreadPool thread_pool_;                // 线程池
   int wake_fd_ = -1;                           // 用来唤醒 epoll_wait 的通知 fd
   uint64_t next_generation_ = 1;               // 给每个新连接分配唯一代次号
   std::mutex completed_mu_;                    // 保护完成队列
   std::queue<CompletedTask> completed_queue_;  // worker 的结果暂存区
+  Ayu::ThreadPool thread_pool_;                // 线程池
 };
 
 #endif  // NOVAKV_TCPSERVER_H

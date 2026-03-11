@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -24,6 +25,11 @@ bool TcpServer::Start(const uint16_t port) {
   }
 
   if (!AddEpollEvent(listen_fd_, EPOLLIN)) {
+    Stop();
+    return false;
+  }
+
+  if (!InitWakeFd()) {
     Stop();
     return false;
   }
@@ -50,6 +56,8 @@ void TcpServer::Run() {
 
       if (fd == listen_fd_) {
         HandleAccept();
+      } else if (fd == wake_fd_) {
+        HandleWorkerCompletions();
       } else {
         HandleConnectionEvent(fd, ev);
       }
@@ -64,6 +72,10 @@ void TcpServer::Stop() {
   }
   connections_.clear();
 
+  if (wake_fd_ >= 0) {
+    close(wake_fd_);
+    wake_fd_ = -1;
+  }
   if (epoll_fd_ >= 0) {
     close(epoll_fd_);
     epoll_fd_ = -1;
@@ -171,7 +183,8 @@ void TcpServer::HandleAccept() {
       continue;
     }
 
-    auto [it, inserted] = connections_.try_emplace(client_fd, client_fd, ++next_generation_);
+    auto [it, inserted] =
+        connections_.try_emplace(client_fd, client_fd, next_generation_++);
     if (!inserted) {
       close(client_fd);
       continue;
@@ -242,7 +255,21 @@ void TcpServer::HandleRead(const int fd) {
     const ParseStatus status = conn.parser.Parse(&conn.input_buffer, command);
 
     if (status == ParseStatus::SUCCESS) {
-      executor_.Execute(command, &conn.output_buffer);
+      uint64_t current_gen = conn.generation;
+      thread_pool_.enqueue([this, fd, command, current_gen]() {
+        // worker 里用临时 NetworkBuffer 生成响应
+        NetworkBuffer response_buffer;
+        executor_.Execute(command, &response_buffer);
+        {
+          // 将结果封装到任务对象中
+          auto data = response_buffer.RetrieveAllAsString();
+          CompletedTask task{fd, current_gen, std::move(data)};
+          std::unique_lock lock(completed_mu_);
+          completed_queue_.push(std::move(task));
+        }
+        constexpr uint64_t one = 1;
+        write(this->wake_fd_, &one, sizeof(one));
+      });
       continue;
     }
     if (status == ParseStatus::INCOMPLETE) {
@@ -311,4 +338,63 @@ bool TcpServer::SetNonBlocking(const int fd) {
     return false;
   }
   return true;
+}
+bool TcpServer::InitWakeFd() {
+  wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  if (wake_fd_ < 0) {
+    wake_fd_ = -1;
+    return false;
+  }
+
+  if (!AddEpollEvent(wake_fd_, EPOLLIN)) {
+    close(wake_fd_);
+    wake_fd_ = -1;
+    return false;
+  }
+
+  return true;
+}
+void TcpServer::HandleWorkerCompletions() {
+  uint64_t counter = 0;
+  while (true) {
+    const ssize_t n = read(wake_fd_, &counter, sizeof(counter));
+    if (n == sizeof(counter)) {
+      continue;
+    }
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      break;
+    }
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    break;
+  }
+
+  // 处理完成队列
+  std::queue<CompletedTask> local;
+  {
+    std::lock_guard lock(completed_mu_);
+    std::swap(local, completed_queue_);
+  }
+
+  while (!local.empty()) {
+    CompletedTask task = std::move(local.front());
+    local.pop();
+
+    auto it = connections_.find(task.fd);
+    if (it == connections_.end()) {
+      continue;
+    }
+
+    Connection& conn = it->second;
+    if (conn.generation != task.generation) {
+      continue;
+    }
+
+    conn.output_buffer.Append(task.response.data(), task.response.size());
+
+    if (!UpdateEpollEvent(task.fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT)) {
+      CloseConnection(task.fd);
+    }
+  }
 }
