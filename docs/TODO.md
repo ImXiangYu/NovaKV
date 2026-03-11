@@ -87,10 +87,10 @@
   - [x] 基础 Server 搭建：完成 non-blocking socket、`bind/listen`、`accept`
   - [x] 搭建 `epoll` 骨架：事件注册、事件分发主循环、连接创建与销毁入口
   - [x] 为每个连接挂接独立上下文：输入缓冲、输出缓冲、RESP parser、连接状态
-- [ ] 2026-03-11
-  - [ ] 打通单线程请求链路：读 socket -> 写入 `NetworkBuffer` -> RESP parse -> `CommandExecutor`
-  - [ ] 打通响应回包：`RESPEncoder` 输出写入连接缓冲，并在可写事件中发送
-  - [ ] 先完成单线程最小闭环，确保协议、命令、回包路径成立
+- [x] 2026-03-11
+  - [x] 打通单线程请求链路：读 socket -> 写入 `NetworkBuffer` -> RESP parse -> `CommandExecutor`
+  - [x] 打通响应回包：`RESPEncoder` 输出写入连接缓冲，并在可写事件中发送
+  - [x] 先完成单线程最小闭环，确保协议、命令、回包路径成立
 - [ ] 2026-03-12
   - [ ] 接入线程池最小版本：IO 线程只负责收发与解析，DB 操作转交 worker
   - [ ] 明确任务对象边界：任务中至少包含连接标识、命令参数、执行所需上下文
