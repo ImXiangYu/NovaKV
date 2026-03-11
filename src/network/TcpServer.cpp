@@ -256,20 +256,34 @@ void TcpServer::HandleRead(const int fd) {
 
     if (status == ParseStatus::SUCCESS) {
       uint64_t current_gen = conn.generation;
-      thread_pool_.enqueue([this, fd, command, current_gen]() {
-        // worker 里用临时 NetworkBuffer 生成响应
-        NetworkBuffer response_buffer;
-        executor_.Execute(command, &response_buffer);
-        {
-          // 将结果封装到任务对象中
-          auto data = response_buffer.RetrieveAllAsString();
-          CompletedTask task{fd, current_gen, std::move(data)};
-          std::unique_lock lock(completed_mu_);
-          completed_queue_.push(std::move(task));
-        }
-        constexpr uint64_t one = 1;
-        write(this->wake_fd_, &one, sizeof(one));
-      });
+      try {
+        thread_pool_.enqueue([this, fd, command, current_gen]() {
+          // worker 里用临时 NetworkBuffer 生成响应
+          NetworkBuffer response_buffer;
+          executor_.Execute(command, &response_buffer);
+          {
+            // 将结果封装到任务对象中
+            auto data = response_buffer.RetrieveAllAsString();
+            CompletedTask task{fd, current_gen, std::move(data)};
+            std::unique_lock lock(completed_mu_);
+            completed_queue_.push(std::move(task));
+          }
+          constexpr uint64_t one = 1;
+          while (true) {
+            const ssize_t wake_n = write(this->wake_fd_, &one, sizeof(one));
+            if (wake_n == static_cast<ssize_t>(sizeof(one))) {
+              break;
+            }
+            if (wake_n < 0 && errno == EINTR) {
+              continue;
+            }
+            break;
+          }
+        });
+      } catch (const std::exception& e) {
+        CloseConnection(fd);
+        return;
+      }
       continue;
     }
     if (status == ParseStatus::INCOMPLETE) {
@@ -278,13 +292,6 @@ void TcpServer::HandleRead(const int fd) {
 
     CloseConnection(fd);  // 非法 RESP 暂时直接关
     return;
-  }
-
-  if (conn.output_buffer.ReadableBytes() > 0) {
-    if (!UpdateEpollEvent(fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT)) {
-      CloseConnection(fd);
-      return;
-    }
   }
 }
 void TcpServer::HandleWrite(const int fd) {
