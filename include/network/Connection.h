@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <map>
+#include <string>
 
 #include "network/NetworkBuffer.h"
 #include "network/RESPParser.h"

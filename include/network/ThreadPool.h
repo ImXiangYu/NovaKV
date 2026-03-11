@@ -59,18 +59,25 @@ class ThreadPool {
     return res;
   }
 
-  // 析构函数：优雅关闭
-  ~ThreadPool() {
+  void Shutdown() {
     {
       std::unique_lock lock(queue_mutex);
+      if (stop) {
+        return;
+      }
       stop = true;
     }
-    condition.notify_all();  // 唤醒所有线程去处理剩余任务并退出
+    condition.notify_all();
     for (std::thread& worker : workers) {
       if (worker.joinable()) {
         worker.join();
       }
     }
+  }
+
+  // 析构函数：优雅关闭
+  ~ThreadPool() {
+    Shutdown();
   }
 
   // 禁止拷贝构造和赋值（线程池不应该是可拷贝的）

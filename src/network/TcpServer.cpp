@@ -13,7 +13,10 @@
 
 #include <cerrno>
 TcpServer::TcpServer(DBImpl* db) : executor_(db), thread_pool_(8) {}
-TcpServer::~TcpServer() { Stop(); }
+TcpServer::~TcpServer() {
+  Stop();
+  Cleanup();
+}
 bool TcpServer::Start(const uint16_t port) {
   if (!InitListenSocket(port)) {
     return false;
@@ -41,7 +44,7 @@ void TcpServer::Run() {
   constexpr int kMaxEvents = 64;
   epoll_event events[kMaxEvents];
 
-  while (running_) {
+  while (running_.load()) {
     const int ready = epoll_wait(epoll_fd_, events, kMaxEvents, -1);
     if (ready < 0) {
       if (errno == EINTR) {
@@ -63,27 +66,16 @@ void TcpServer::Run() {
       }
     }
   }
+  // 循环结束后CleanUp
+  Cleanup();
 }
 void TcpServer::Stop() {
-  running_ = false;
+  const bool was_running = running_.exchange(false);
+  if (!was_running) {
+    return;
+  }
 
-  for (auto& [fd, conn] : connections_) {
-    close(fd);
-  }
-  connections_.clear();
-
-  if (wake_fd_ >= 0) {
-    close(wake_fd_);
-    wake_fd_ = -1;
-  }
-  if (epoll_fd_ >= 0) {
-    close(epoll_fd_);
-    epoll_fd_ = -1;
-  }
-  if (listen_fd_ >= 0) {
-    close(listen_fd_);
-    listen_fd_ = -1;
-  }
+  WakeEventLoop();
 }
 bool TcpServer::InitListenSocket(const uint16_t port) {
   listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -346,6 +338,55 @@ bool TcpServer::SetNonBlocking(const int fd) {
     return false;
   }
   return true;
+}
+void TcpServer::Cleanup() {
+  if (listen_fd_ >= 0) {
+    RemoveEpollEvent(listen_fd_);
+    close(listen_fd_);
+    listen_fd_ = -1;
+  }
+
+  thread_pool_.Shutdown();
+
+  {
+    std::lock_guard lock(completed_mu_);
+    std::queue<CompletedTask> empty;
+    std::swap(completed_queue_, empty);
+  }
+
+  for (auto& [fd, conn] : connections_) {
+    RemoveEpollEvent(fd);
+    close(fd);
+  }
+  connections_.clear();
+
+  if (wake_fd_ >= 0) {
+    RemoveEpollEvent(wake_fd_);
+    close(wake_fd_);
+    wake_fd_ = -1;
+  }
+
+  if (epoll_fd_ >= 0) {
+    close(epoll_fd_);
+    epoll_fd_ = -1;
+  }
+}
+void TcpServer::WakeEventLoop() const {
+  if (wake_fd_ < 0) {
+    return;
+  }
+
+  constexpr uint64_t one = 1;
+  while (true) {
+    const ssize_t n = ::write(wake_fd_, &one, sizeof(one));
+    if (n == static_cast<ssize_t>(sizeof(one))) {
+      return;
+    }
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    return;
+  }
 }
 bool TcpServer::InitWakeFd() {
   wake_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
