@@ -31,7 +31,11 @@ target_include_directories(novakv_core PUBLIC include)
 add_executable(nova_test main.cpp)
 target_link_libraries(nova_test PRIVATE novakv_core)
 
-# --- 目标 2: Google Test 单元测试 ---
+# --- 目标 2: 服务端测试程序 ---
+add_executable(nova_server server_main.cpp)
+target_link_libraries(nova_server PRIVATE novakv_core)
+
+# --- 目标 3: Google Test 单元测试 ---
 include(FetchContent)
 FetchContent_Declare(
         googletest
@@ -40,7 +44,7 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# --- 目标 3: Google Benchmark ---
+# --- 目标 4: Google Benchmark ---
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
@@ -49,7 +53,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(benchmark)
 
-# --- 目标 4: 基准测试可执行文件 ---
+# --- 目标 5: 基准测试可执行文件 ---
 add_executable(nova_bench benchmark/db_bench.cpp)
 target_link_libraries(nova_bench PRIVATE novakv_core benchmark::benchmark)
 
