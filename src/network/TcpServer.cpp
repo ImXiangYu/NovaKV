@@ -23,17 +23,17 @@ bool TcpServer::Start(const uint16_t port) {
   }
 
   if (!InitEpoll()) {
-    Stop();
+    Cleanup();
     return false;
   }
 
   if (!AddEpollEvent(listen_fd_, EPOLLIN)) {
-    Stop();
+    Cleanup();
     return false;
   }
 
   if (!InitWakeFd()) {
-    Stop();
+    Cleanup();
     return false;
   }
 
@@ -54,6 +54,10 @@ void TcpServer::Run() {
     }
 
     for (int i = 0; i < ready; ++i) {
+      if (!running_.load()) {
+        break;
+      }
+
       const int fd = events[i].data.fd;
       const uint32_t ev = events[i].events;
 
@@ -153,7 +157,7 @@ void TcpServer::RemoveEpollEvent(const int fd) const {
   epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
 }
 void TcpServer::HandleAccept() {
-  while (true) {
+  while (running_.load()) {
     sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
 
@@ -190,6 +194,10 @@ void TcpServer::HandleAccept() {
   }
 }
 void TcpServer::HandleConnectionEvent(const int fd, const uint32_t events) {
+  if (!running_.load()) {
+    return;
+  }
+
   if (events & (EPOLLERR | EPOLLHUP)) {
     CloseConnection(fd);
     return;
