@@ -13,13 +13,13 @@ namespace Ayu {
 class ThreadPool {
  public:
   // 构造函数：启动线程
-  explicit ThreadPool(size_t threads) : stop(false) {
+  explicit ThreadPool(const size_t threads) : stop(false) {
     for (size_t i = 0; i < threads; ++i) {
       workers.emplace_back([this] {
         while (true) {
           std::function<void()> task;
           {
-            std::unique_lock<std::mutex> lock(this->queue_mutex);
+            std::unique_lock lock(this->queue_mutex);
             // 等待：直到线程池停止 或 任务队列不为空
             this->condition.wait(
                 lock, [this] { return this->stop || !this->tasks.empty(); });
@@ -41,15 +41,15 @@ class ThreadPool {
   // 提交任务
   template <class F, class... Args>
   auto enqueue(F&& f, Args&&... args)
-      -> std::future<typename std::result_of<F(Args...)>::type> {
-    using return_type = typename std::result_of<F(Args...)>::type;
+      -> std::future<std::result_of_t<F(Args...)>> {
+    using return_type = std::result_of_t<F(Args...)>;
 
     auto task = std::make_shared<std::packaged_task<return_type()>>(
         std::bind(std::forward<F>(f), std::forward<Args>(args)...));
 
     std::future<return_type> res = task->get_future();
     {
-      std::unique_lock<std::mutex> lock(queue_mutex);
+      std::unique_lock lock(queue_mutex);
       if (stop) {
         throw std::runtime_error("enqueue on stopped ThreadPool");
       }
@@ -62,7 +62,7 @@ class ThreadPool {
   // 析构函数：优雅关闭
   ~ThreadPool() {
     {
-      std::unique_lock<std::mutex> lock(queue_mutex);
+      std::unique_lock lock(queue_mutex);
       stop = true;
     }
     condition.notify_all();  // 唤醒所有线程去处理剩余任务并退出

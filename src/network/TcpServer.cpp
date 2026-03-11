@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include <cerrno>
-TcpServer::TcpServer(DBImpl* db) : executor_(db) {}
+TcpServer::TcpServer(DBImpl* db) : executor_(db), thread_pool_(8) {}
 TcpServer::~TcpServer() { Stop(); }
 bool TcpServer::Start(const uint16_t port) {
   if (!InitListenSocket(port)) {
@@ -171,7 +171,7 @@ void TcpServer::HandleAccept() {
       continue;
     }
 
-    auto [it, inserted] = connections_.try_emplace(client_fd, client_fd);
+    auto [it, inserted] = connections_.try_emplace(client_fd, client_fd, ++next_generation_);
     if (!inserted) {
       close(client_fd);
       continue;
