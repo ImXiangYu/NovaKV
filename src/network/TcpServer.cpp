@@ -197,7 +197,7 @@ void TcpServer::HandleAccept() {
     }
   }
 }
-void TcpServer::HandleConnectionEvent(int fd, uint32_t events) {
+void TcpServer::HandleConnectionEvent(const int fd, const uint32_t events) {
   if (events & (EPOLLERR | EPOLLHUP)) {
     CloseConnection(fd);
     return;
@@ -255,18 +255,20 @@ void TcpServer::HandleRead(const int fd) {
     const ParseStatus status = conn.parser.Parse(&conn.input_buffer, command);
 
     if (status == ParseStatus::SUCCESS) {
-      uint64_t current_gen = conn.generation;
+      const uint64_t seq = conn.next_request_seq++;
+      WorkerTask worker_task{fd, conn.generation, seq, std::move(command)};
       try {
-        thread_pool_.enqueue([this, fd, command, current_gen]() {
+        thread_pool_.enqueue([this, worker_task] {
           // worker 里用临时 NetworkBuffer 生成响应
           NetworkBuffer response_buffer;
-          executor_.Execute(command, &response_buffer);
+          executor_.Execute(worker_task.command, &response_buffer);
           {
             // 将结果封装到任务对象中
-            auto data = response_buffer.RetrieveAllAsString();
-            CompletedTask task{fd, current_gen, std::move(data)};
+            const CompletedTask done_task{
+                worker_task.fd, worker_task.generation, worker_task.seq,
+                response_buffer.RetrieveAllAsString()};
             std::unique_lock lock(completed_mu_);
-            completed_queue_.push(std::move(task));
+            completed_queue_.push(done_task);
           }
           constexpr uint64_t one = 1;
           while (true) {
@@ -289,7 +291,6 @@ void TcpServer::HandleRead(const int fd) {
     if (status == ParseStatus::INCOMPLETE) {
       break;
     }
-
     CloseConnection(fd);  // 非法 RESP 暂时直接关
     return;
   }
@@ -398,10 +399,24 @@ void TcpServer::HandleWorkerCompletions() {
       continue;
     }
 
-    conn.output_buffer.Append(task.response.data(), task.response.size());
+    conn.pending_responses.emplace(task.seq, std::move(task.response));
+    bool appended = false;
+    while (true) {
+      auto ready_it = conn.pending_responses.find(conn.next_write_seq);
+      if (ready_it == conn.pending_responses.end()) {
+        break;
+      }
 
-    if (!UpdateEpollEvent(task.fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT)) {
-      CloseConnection(task.fd);
+      conn.output_buffer.Append(ready_it->second.data(),
+                                ready_it->second.size());
+      conn.pending_responses.erase(ready_it);
+      ++conn.next_write_seq;
+      appended = true;
+    }
+    if (appended) {
+      if (!UpdateEpollEvent(task.fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT)) {
+        CloseConnection(task.fd);
+      }
     }
   }
 }

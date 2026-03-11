@@ -6,6 +6,7 @@
 #define NOVAKV_CONNECTION_H
 
 #include <cstdint>
+#include <map>
 
 #include "network/NetworkBuffer.h"
 #include "network/RESPParser.h"
@@ -20,6 +21,10 @@ struct Connection {
   NetworkBuffer output_buffer;  // 已经生成但还没完全发出去的响应
   RESPParser parser;            // 这个连接自己的 RESP 解析状态机
   bool closing = false;         // 这个连接是不是准备关闭
+
+  uint64_t next_request_seq = 0;                      // 请求序号
+  uint64_t next_write_seq = 0;                        // 下一个应写回的 seq
+  std::map<uint64_t, std::string> pending_responses;  // 按 seq 找最小连续段
 };
 
 #endif  // NOVAKV_CONNECTION_H

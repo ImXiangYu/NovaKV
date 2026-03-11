@@ -15,12 +15,14 @@
 struct WorkerTask {
   int fd;
   uint64_t generation;
+  uint64_t seq;
   std::vector<std::string> command;
 };
 
 struct CompletedTask {
   int fd;
   uint64_t generation;
+  uint64_t seq;
   std::string response;
 };
 
