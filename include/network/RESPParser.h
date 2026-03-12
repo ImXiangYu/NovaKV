@@ -6,6 +6,7 @@
 #define NOVAKV_RESPPARSER_H
 
 #include <string>
+#include <vector>
 
 #include "network/NetworkBuffer.h"
 
@@ -31,12 +32,13 @@ class RESPParser {
                     std::vector<std::string>& out_command);
 
   // 状态重置，用于一个完整命令解析后
-  void Reset();
+ void Reset();
 
  private:
   State state_;
   int64_t array_size_;  // 数组总元素数
   int64_t bulk_len_;    // 当前正在解析的字符串长度
+  std::vector<std::string> current_command_;  // 半包时暂存已解析参数
 };
 
 #endif  // NOVAKV_RESPPARSER_H

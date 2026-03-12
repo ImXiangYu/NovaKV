@@ -44,6 +44,7 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
 
         if (array_size_ == 0) {
           buffer->Retrieve(crlf - firstPos + 2);
+          out_command.clear();
           Reset();
           return ParseStatus::SUCCESS;
         }
@@ -83,9 +84,10 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
 
         if (bulk_len_ == -1) {
           buffer->Retrieve(crlf - firstPos + 2);
-          out_command.emplace_back("");
+          current_command_.emplace_back("");
 
-          if (out_command.size() == static_cast<size_t>(array_size_)) {
+          if (current_command_.size() == static_cast<size_t>(array_size_)) {
+            out_command = std::move(current_command_);
             Reset();
             return ParseStatus::SUCCESS;
           }
@@ -115,10 +117,11 @@ ParseStatus RESPParser::Parse(NetworkBuffer* buffer,
 
         // 2. 提取数据，存入 out_command
         // 读出 bulk_len_ 个字节
-        out_command.emplace_back(firstPos, static_cast<size_t>(bulk_len_));
+        current_command_.emplace_back(firstPos, static_cast<size_t>(bulk_len_));
         buffer->Retrieve(bulk_len_ + 2);
         // 3. 检查是否解析完所有参数，完事了就返回 SUCCESS
-        if (out_command.size() == static_cast<size_t>(array_size_)) {
+        if (current_command_.size() == static_cast<size_t>(array_size_)) {
+          out_command = std::move(current_command_);
           Reset();
           return ParseStatus::SUCCESS;
         } else {
@@ -138,4 +141,5 @@ void RESPParser::Reset() {
   state_ = State::EXPECT_ARRAY_SIZE;
   array_size_ = 0;
   bulk_len_ = 0;
+  current_command_.clear();
 }
