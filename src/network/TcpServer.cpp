@@ -503,7 +503,7 @@ void TcpServer::HandleWorkerCompletions() {
 void TcpServer::FailConnectionProtocol(Connection& conn, const int fd,
                                        const std::string& msg) {
   NetworkBuffer response_buffer;
-  RESPEncoder::EncodeError(&conn.output_buffer, msg);
+  RESPEncoder::EncodeError(&response_buffer, msg);
 
   const uint64_t seq = conn.next_request_seq++;
   conn.pending_responses.emplace(seq, response_buffer.RetrieveAllAsString());
