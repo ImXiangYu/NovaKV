@@ -13,6 +13,7 @@
 
 #include <cerrno>
 
+#include "Logger.h"
 #include "network/RESPEncoder.h"
 TcpServer::TcpServer(DBImpl* db) : executor_(db), thread_pool_(8) {}
 TcpServer::~TcpServer() {
@@ -270,7 +271,11 @@ void TcpServer::HandleRead(const int fd) {
             // 临时 NetworkBuffer 用来生成响应
             executor_.Execute(worker_task.command, &response_buffer);
           } catch (const std::exception& e) {
-            LOG_ERROR("internal server error");
+            const std::string errorMsg = e.what();
+            LOG_ERROR("internal server error: " + errorMsg);
+            RESPEncoder::EncodeError(&response_buffer, "internal server error");
+          } catch (...) {
+            LOG_ERROR("worker task failed with unknown exception");
             RESPEncoder::EncodeError(&response_buffer, "internal server error");
           }
           {
@@ -340,13 +345,24 @@ void TcpServer::HandleWrite(const int fd) {
     return;
   }
   if (conn.output_buffer.ReadableBytes() == 0) {
-    if (!UpdateEpollEvent(fd, EPOLLIN | EPOLLRDHUP)) {
-      CloseConnection(fd);
+    if (conn.closing) {
+      const bool all_done = conn.pending_responses.empty() &&
+                            conn.next_write_seq == conn.next_request_seq;
+
+      if (all_done) {
+        CloseConnection(fd);
+        return;
+      }
+
+      if (!UpdateEpollEvent(fd, EPOLLRDHUP)) {
+        CloseConnection(fd);
+      }
       return;
     }
 
-    if (conn.closing) {
+    if (!UpdateEpollEvent(fd, EPOLLIN | EPOLLRDHUP)) {
       CloseConnection(fd);
+      return;
     }
   }
 }
@@ -476,7 +492,9 @@ void TcpServer::HandleWorkerCompletions() {
       appended = true;
     }
     if (appended) {
-      if (!UpdateEpollEvent(task.fd, EPOLLIN | EPOLLRDHUP | EPOLLOUT)) {
+      const uint32_t events = conn.closing ? (EPOLLOUT | EPOLLRDHUP)
+                                           : (EPOLLIN | EPOLLRDHUP | EPOLLOUT);
+      if (!UpdateEpollEvent(task.fd, events)) {
         CloseConnection(task.fd);
       }
     }
@@ -484,10 +502,28 @@ void TcpServer::HandleWorkerCompletions() {
 }
 void TcpServer::FailConnectionProtocol(Connection& conn, const int fd,
                                        const std::string& msg) {
+  NetworkBuffer response_buffer;
   RESPEncoder::EncodeError(&conn.output_buffer, msg);
+
+  const uint64_t seq = conn.next_request_seq++;
+  conn.pending_responses.emplace(seq, response_buffer.RetrieveAllAsString());
   conn.closing = true;
   conn.input_buffer.RetrieveAll();
-  if (!UpdateEpollEvent(fd, EPOLLOUT | EPOLLRDHUP)) {
+
+  bool appended = false;
+  while (true) {
+    auto it = conn.pending_responses.find(conn.next_write_seq);
+    if (it == conn.pending_responses.end()) {
+      break;
+    }
+    conn.output_buffer.Append(it->second.data(), it->second.size());
+    conn.pending_responses.erase(it);
+    ++conn.next_write_seq;
+    appended = true;
+  }
+
+  if (const uint32_t events = appended ? (EPOLLOUT | EPOLLRDHUP) : EPOLLRDHUP;
+      !UpdateEpollEvent(fd, events)) {
     CloseConnection(fd);
   }
 }
