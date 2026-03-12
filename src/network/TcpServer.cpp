@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #include <cerrno>
+
+#include "network/RESPEncoder.h"
 TcpServer::TcpServer(DBImpl* db) : executor_(db), thread_pool_(8) {}
 TcpServer::~TcpServer() {
   Stop();
@@ -228,6 +230,9 @@ void TcpServer::HandleRead(const int fd) {
     return;
   }
   Connection& conn = it->second;
+  if (conn.closing) {
+    return;
+  }
 
   // 做一次 Socket 读取
   int savedErrno = 0;
@@ -261,7 +266,13 @@ void TcpServer::HandleRead(const int fd) {
         thread_pool_.enqueue([this, worker_task] {
           // worker 里用临时 NetworkBuffer 生成响应
           NetworkBuffer response_buffer;
-          executor_.Execute(worker_task.command, &response_buffer);
+          try {
+            // 临时 NetworkBuffer 用来生成响应
+            executor_.Execute(worker_task.command, &response_buffer);
+          } catch (const std::exception& e) {
+            LOG_ERROR("internal server error");
+            RESPEncoder::EncodeError(&response_buffer, "internal server error");
+          }
           {
             // 将结果封装到任务对象中
             const CompletedTask done_task{
@@ -291,8 +302,10 @@ void TcpServer::HandleRead(const int fd) {
     if (status == ParseStatus::INCOMPLETE) {
       break;
     }
-    CloseConnection(fd);  // 非法 RESP 暂时直接关
-    return;
+    if (status == ParseStatus::ERROR) {
+      FailConnectionProtocol(conn, fd, "protocol error");
+      return;
+    }
   }
 }
 void TcpServer::HandleWrite(const int fd) {
@@ -467,5 +480,14 @@ void TcpServer::HandleWorkerCompletions() {
         CloseConnection(task.fd);
       }
     }
+  }
+}
+void TcpServer::FailConnectionProtocol(Connection& conn, const int fd,
+                                       const std::string& msg) {
+  RESPEncoder::EncodeError(&conn.output_buffer, msg);
+  conn.closing = true;
+  conn.input_buffer.RetrieveAll();
+  if (!UpdateEpollEvent(fd, EPOLLOUT | EPOLLRDHUP)) {
+    CloseConnection(fd);
   }
 }

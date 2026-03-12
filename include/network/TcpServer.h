@@ -5,13 +5,13 @@
 #ifndef NOVAKV_TCPSERVER_H
 #define NOVAKV_TCPSERVER_H
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <queue>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <atomic>
 
 #include "network/CommandExecutor.h"
 #include "network/Connection.h"
@@ -63,13 +63,15 @@ class TcpServer {
   CommandExecutor executor_;
   int listen_fd_ = -1;                               // 监听端口用的 socket
   int epoll_fd_ = -1;                                // epoll 实例
-  std::atomic<bool> running_{false};                             // 事件循环是否继续运行
+  std::atomic<bool> running_{false};                 // 事件循环是否继续运行
   std::unordered_map<int, Connection> connections_;  // 所有在线连接
 
   // 初始化唤醒 fd，并注册进 epoll
   bool InitWakeFd();
   // IO 线程处理完成队列的入口
   void HandleWorkerCompletions();
+
+  void FailConnectionProtocol(Connection& conn, int fd, const std::string& msg);
 
   int wake_fd_ = -1;                           // 用来唤醒 epoll_wait 的通知 fd
   uint64_t next_generation_ = 1;               // 给每个新连接分配唯一代次号
