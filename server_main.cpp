@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "DBImpl.h"
+#include "Logger.h"
 #include "network/TcpServer.h"
 
 namespace {
@@ -13,6 +14,7 @@ namespace {
 TcpServer* g_server = nullptr;
 
 void HandleStopSignal(int) {
+  LOG_INFO("received stop signal");
   if (g_server != nullptr) {
     g_server->Stop();
   }

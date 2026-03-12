@@ -74,6 +74,7 @@ void TcpServer::Run() {
       }
     }
   }
+  LOG_INFO("event loop exiting");
   // 循环结束后CleanUp
   Cleanup();
 }
@@ -444,6 +445,8 @@ bool TcpServer::SetNonBlocking(const int fd) {
   return true;
 }
 void TcpServer::Cleanup() {
+  LOG_INFO("cleanup begin");
+
   if (listen_fd_ >= 0) {
     RemoveEpollEvent(listen_fd_);
     close(listen_fd_);
@@ -474,6 +477,8 @@ void TcpServer::Cleanup() {
     close(epoll_fd_);
     epoll_fd_ = -1;
   }
+
+  LOG_INFO("cleanup finished");
 }
 void TcpServer::WakeEventLoop() const {
   if (wake_fd_ < 0) {
