@@ -40,6 +40,7 @@ bool TcpServer::Start(const uint16_t port) {
     return false;
   }
 
+  stopping_ = false;
   running_ = true;
   return true;
 }
@@ -77,12 +78,52 @@ void TcpServer::Run() {
   Cleanup();
 }
 void TcpServer::Stop() {
-  const bool was_running = running_.exchange(false);
-  if (!was_running) {
+  // 如果本来就没启动，直接返回
+  if (!running_.load()) {
     return;
   }
 
+  // 如果已经在停机中了，不重复处理，只唤醒一次事件循环
+  if (stopping_.exchange(true)) {
+    WakeEventLoop();
+    return;
+  }
+  LOG_INFO("server stopping, active_connections=" +
+           std::to_string(connections_.size()));
+
+  // 首次停机时：
+  // 先把监听 socket 关掉，这样不会再 accept 新连接
+  if (listen_fd_ >= 0) {
+    RemoveEpollEvent(listen_fd_);
+    close(listen_fd_);
+    listen_fd_ = -1;
+  }
+
+  // 把所有老连接都切到 closing 状态，不再允许继续读新请求
+  std::vector<int> to_close;
+  for (auto& [fd, conn] : connections_) {
+    conn.closing = true;
+    conn.input_buffer.RetrieveAll();
+
+    if (IsConnectionDrained(conn)) {
+      to_close.push_back(fd);
+      continue;
+    }
+
+    if (!UpdateEpollEvent(fd, EPOLLRDHUP | EPOLLOUT)) {
+      to_close.push_back(fd);
+    }
+  }
+
+  // 对已经彻底排空的连接直接关；
+
+  for (const int fd : to_close) {
+    CloseConnection(fd);
+  }
+
+  // 还没排空的连接继续留给 HandleWrite() / HandleWorkerCompletions() 收尾
   WakeEventLoop();
+  MaybeFinishShutdown();
 }
 bool TcpServer::InitListenSocket(const uint16_t port) {
   listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -238,6 +279,7 @@ void TcpServer::CloseConnection(const int fd) {
   RemoveEpollEvent(fd);
   close(fd);
   connections_.erase(it);
+  MaybeFinishShutdown();
 }
 void TcpServer::HandleRead(const int fd) {
   // 找到 Connection
@@ -370,10 +412,7 @@ void TcpServer::HandleWrite(const int fd) {
   }
   if (conn.output_buffer.ReadableBytes() == 0) {
     if (conn.closing) {
-      const bool all_done = conn.pending_responses.empty() &&
-                            conn.next_write_seq == conn.next_request_seq;
-
-      if (all_done) {
+      if (IsConnectionDrained(conn)) {
         CloseConnection(fd);
         return;
       }
@@ -529,6 +568,7 @@ void TcpServer::HandleWorkerCompletions() {
       }
     }
   }
+  MaybeFinishShutdown();
 }
 void TcpServer::FailConnectionProtocol(Connection& conn, const int fd,
                                        const std::string& msg) {
@@ -559,4 +599,25 @@ void TcpServer::FailConnectionProtocol(Connection& conn, const int fd,
         std::to_string(fd));
     CloseConnection(fd);
   }
+}
+bool TcpServer::IsConnectionDrained(const Connection& conn) {
+  return conn.output_buffer.ReadableBytes() == 0 &&
+         conn.pending_responses.empty() &&
+         conn.next_write_seq == conn.next_request_seq;
+}
+void TcpServer::MaybeFinishShutdown() {
+  if (!stopping_.load()) {
+    return;
+  }
+
+  if (listen_fd_ >= 0) {
+    return;
+  }
+
+  if (!connections_.empty()) {
+    return;
+  }
+
+  running_ = false;
+  WakeEventLoop();
 }

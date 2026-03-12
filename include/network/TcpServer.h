@@ -78,6 +78,11 @@ class TcpServer {
   std::mutex completed_mu_;                    // 保护完成队列
   std::queue<CompletedTask> completed_queue_;  // worker 的结果暂存区
   Ayu::ThreadPool thread_pool_;                // 线程池
+
+  std::atomic<bool> stopping_{false};
+
+  static bool IsConnectionDrained(const Connection& conn) ;
+  void MaybeFinishShutdown();
 };
 
 #endif  // NOVAKV_TCPSERVER_H
