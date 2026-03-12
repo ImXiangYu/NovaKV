@@ -8,17 +8,20 @@
 #include <cctype>
 #include <string>
 
-#include "network/RESPEncoder.h"
+#include "Logger.h"
 #include "ValueRecord.h"
+#include "network/RESPEncoder.h"
 
 void CommandExecutor::Execute(const std::vector<std::string>& command,
                               NetworkBuffer* response_buffer) const {
   if (db_ == nullptr) {
+    LOG_ERROR("CommandExecutor called with null db");
     RESPEncoder::EncodeError(response_buffer, "db is not initialized");
     return;
   }
 
   if (command.empty()) {
+    LOG_WARN("received empty command");
     RESPEncoder::EncodeError(response_buffer, "empty command");
     return;
   }
@@ -42,13 +45,15 @@ void CommandExecutor::Execute(const std::vector<std::string>& command,
     return;
   }
 
-  RESPEncoder::EncodeError(response_buffer, "unknown command '" + command[0] + "'");
+  LOG_WARN("unknown command '" + command[0] + "'");
+  RESPEncoder::EncodeError(response_buffer,
+                           "unknown command '" + command[0] + "'");
 }
 
 void CommandExecutor::HandleSet(const std::vector<std::string>& command,
                                 NetworkBuffer* response_buffer) const {
   if (!ExpectArgCount(command, 3, response_buffer)) {
-    return ;
+    return;
   }
 
   const std::string& key = command[1];
@@ -66,7 +71,7 @@ void CommandExecutor::HandleSet(const std::vector<std::string>& command,
 void CommandExecutor::HandleGet(const std::vector<std::string>& command,
                                 NetworkBuffer* response_buffer) const {
   if (!ExpectArgCount(command, 2, response_buffer)) {
-    return ;
+    return;
   }
 
   const std::string& key = command[1];
@@ -88,7 +93,7 @@ void CommandExecutor::HandleGet(const std::vector<std::string>& command,
 void CommandExecutor::HandleDel(const std::vector<std::string>& command,
                                 NetworkBuffer* response_buffer) const {
   if (!ExpectArgCount(command, 2, response_buffer)) {
-    return ;
+    return;
   }
 
   const std::string& key = command[1];
@@ -105,7 +110,7 @@ void CommandExecutor::HandleDel(const std::vector<std::string>& command,
 void CommandExecutor::HandleRScan(const std::vector<std::string>& command,
                                   NetworkBuffer* response_buffer) const {
   if (!ExpectArgCount(command, 2, response_buffer)) {
-    return ;
+    return;
   }
 
   const std::string& start_key = command[1];
@@ -143,7 +148,10 @@ bool CommandExecutor::ExpectArgCount(const std::vector<std::string>& command,
   }
 
   const std::string cmd = NormalizeCommandName(command[0]);
-  RESPEncoder::EncodeError(response_buffer,
-                           "wrong number of arguments for '" + cmd + "' command");
+  LOG_WARN("wrong number of arguments for '" + cmd + "' command: got " +
+           std::to_string(command.size()) + ", expected " +
+           std::to_string(expected_argc));
+  RESPEncoder::EncodeError(
+      response_buffer, "wrong number of arguments for '" + cmd + "' command");
   return false;
 }

@@ -174,10 +174,13 @@ void TcpServer::HandleAccept() {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         break;
       }
+      LOG_ERROR("accept failed errno=" + std::to_string(errno));
       break;
     }
 
     if (!SetNonBlocking(client_fd)) {
+      LOG_WARN("failed to set non-blocking for fd=" +
+               std::to_string(client_fd));
       close(client_fd);
       continue;
     }
@@ -185,15 +188,22 @@ void TcpServer::HandleAccept() {
     auto [it, inserted] =
         connections_.try_emplace(client_fd, client_fd, next_generation_++);
     if (!inserted) {
+      LOG_WARN("duplicate connection context for fd=" +
+               std::to_string(client_fd));
       close(client_fd);
       continue;
     }
 
     if (!AddEpollEvent(client_fd, EPOLLIN | EPOLLRDHUP)) {
+      LOG_ERROR("failed to register client fd to epoll, fd=" +
+                std::to_string(client_fd));
       connections_.erase(it);
       close(client_fd);
       continue;
     }
+
+    LOG_INFO("connection accepted fd=" + std::to_string(client_fd) +
+             " generation=" + std::to_string(it->second.generation));
   }
 }
 void TcpServer::HandleConnectionEvent(const int fd, const uint32_t events) {
@@ -202,6 +212,8 @@ void TcpServer::HandleConnectionEvent(const int fd, const uint32_t events) {
   }
 
   if (events & (EPOLLERR | EPOLLHUP)) {
+    LOG_WARN("connection event error/hup fd=" + std::to_string(fd) +
+             " events=" + std::to_string(events));
     CloseConnection(fd);
     return;
   }
@@ -219,6 +231,9 @@ void TcpServer::CloseConnection(const int fd) {
   if (it == connections_.end()) {
     return;
   }
+
+  LOG_INFO("connection closed fd=" + std::to_string(fd) +
+           " generation=" + std::to_string(it->second.generation));
 
   RemoveEpollEvent(fd);
   close(fd);
@@ -242,6 +257,7 @@ void TcpServer::HandleRead(const int fd) {
   // 对端正常关闭了连接
   // 这是 TCP 的 EOF 语义
   if (n == 0) {
+    LOG_INFO("peer closed connection fd=" + std::to_string(fd));
     CloseConnection(fd);
     return;
   }
@@ -252,6 +268,8 @@ void TcpServer::HandleRead(const int fd) {
     // 系统调用被信号打断，中断
     if (savedErrno == EINTR) return;
     // 其他错误，是真实读错误
+    LOG_ERROR("read failed fd=" + std::to_string(fd) +
+              " errno=" + std::to_string(savedErrno));
     CloseConnection(fd);
     return;
   }
@@ -299,6 +317,8 @@ void TcpServer::HandleRead(const int fd) {
           }
         });
       } catch (const std::exception& e) {
+        LOG_ERROR("failed to enqueue worker task fd=" + std::to_string(fd) +
+                  " seq=" + std::to_string(seq) + " error=" + e.what());
         CloseConnection(fd);
         return;
       }
@@ -308,6 +328,8 @@ void TcpServer::HandleRead(const int fd) {
       break;
     }
     if (status == ParseStatus::ERROR) {
+      LOG_WARN("protocol error fd=" + std::to_string(fd) +
+               " generation=" + std::to_string(conn.generation));
       FailConnectionProtocol(conn, fd, "protocol error");
       return;
     }
@@ -341,6 +363,8 @@ void TcpServer::HandleWrite(const int fd) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       break;
     }
+    LOG_ERROR("write failed fd=" + std::to_string(fd) +
+              " errno=" + std::to_string(errno));
     CloseConnection(fd);
     return;
   }
@@ -355,12 +379,16 @@ void TcpServer::HandleWrite(const int fd) {
       }
 
       if (!UpdateEpollEvent(fd, EPOLLRDHUP)) {
+        LOG_ERROR("failed to switch closing connection events fd=" +
+                  std::to_string(fd));
         CloseConnection(fd);
       }
       return;
     }
 
     if (!UpdateEpollEvent(fd, EPOLLIN | EPOLLRDHUP)) {
+      LOG_ERROR("failed to switch connection back to read mode fd=" +
+                std::to_string(fd));
       CloseConnection(fd);
       return;
     }
@@ -495,6 +523,8 @@ void TcpServer::HandleWorkerCompletions() {
       const uint32_t events = conn.closing ? (EPOLLOUT | EPOLLRDHUP)
                                            : (EPOLLIN | EPOLLRDHUP | EPOLLOUT);
       if (!UpdateEpollEvent(task.fd, events)) {
+        LOG_ERROR("failed to update epoll events after worker completion fd=" +
+                  std::to_string(task.fd));
         CloseConnection(task.fd);
       }
     }
@@ -524,6 +554,9 @@ void TcpServer::FailConnectionProtocol(Connection& conn, const int fd,
 
   if (const uint32_t events = appended ? (EPOLLOUT | EPOLLRDHUP) : EPOLLRDHUP;
       !UpdateEpollEvent(fd, events)) {
+    LOG_ERROR(
+        "failed to switch protocol-error connection to closing state fd=" +
+        std::to_string(fd));
     CloseConnection(fd);
   }
 }
