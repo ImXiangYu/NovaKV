@@ -21,6 +21,8 @@
 - **Documentation Style**:
   - Do not modify docs by default; only update documentation when the Owner explicitly asks for it.
   - Review-oriented docs under `docs/guide/` should be timeless knowledge summaries, not day-based work logs.
+  - When the Owner asks to generate documentation, default the audience to the Owner themself, not end users or external users of the project.
+  - Generated docs should serve interview preparation and post-implementation review: they should help the Owner quickly recall module responsibilities, call chains, design tradeoffs, and how to explain the project in interviews.
   - Avoid dates and time-scoped phrasing such as “today”, “this step”, or “current phase” unless the Owner explicitly wants a dated record.
   - Keep only the core content needed for later review: what the module/function does, why it is designed that way, its responsibilities, the call chain, and key pitfalls or boundaries.
   - Day-based progress tracking belongs in `docs/TODO.md` or dedicated log documents, not in long-lived guide docs.
